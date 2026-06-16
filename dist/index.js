@@ -30500,6 +30500,7 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
 Regras:
 - "line" deve ser um dos números de linha anotados daquele arquivo. Nunca invente números de linha.
 - Mantenha cada comentário curto e acionável. Aponte o problema exato.
+- Escreva os campos "summary" e "comment" SEMPRE em português do Brasil, independentemente do idioma do código ou dos comentários.
 - Se não houver problemas, retorne um array "findings" vazio.
 - Responda somente com JSON válido.`;
 function buildUserPrompt(diffText) {
@@ -30536,6 +30537,7 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
 Regras:
 - "line" deve ser um dos números de linha anotados daquele arquivo. Nunca invente números de linha.
 - Mantenha cada comentário curto e acionável. Aponte o problema exato.
+- Escreva os campos "summary" e "comment" SEMPRE em português do Brasil, independentemente do idioma do código ou dos comentários.
 - Se não houver problemas, retorne um array "findings" vazio.
 - Responda somente com JSON válido.`;
 function buildFullUserPrompt(diffText) {
