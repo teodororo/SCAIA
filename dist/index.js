@@ -29943,7 +29943,7 @@ class AiClient {
         const base = opts.baseUrl.replace(/\/+$/, "");
         this.endpoint = `${base}/chat/completions`;
     }
-    async review(diffText) {
+    async review(userContent) {
         const body = {
             model: this.opts.model,
             temperature: 0,
@@ -29952,7 +29952,7 @@ class AiClient {
                     role: "system",
                     content: this.opts.systemPrompt || prompt_1.DEFAULT_SYSTEM_PROMPT,
                 },
-                { role: "user", content: (0, prompt_1.buildUserPrompt)(diffText) },
+                { role: "user", content: userContent },
             ],
             response_format: { type: "json_object" },
         };
@@ -30140,6 +30140,7 @@ exports.getPrContext = getPrContext;
 exports.listChangedFiles = listChangedFiles;
 exports.getHeadSha = getHeadSha;
 exports.postReview = postReview;
+exports.matchesAnyGlob = matchesAnyGlob;
 const github = __importStar(__nccwpck_require__(3228));
 /** Resolve o contexto do pull request a partir do payload do evento do workflow. */
 function getPrContext() {
@@ -30236,8 +30237,11 @@ function severityLabel(sev) {
     }
 }
 /** Matcher de glob bem pequeno, com suporte a segmentos "*" e "**". */
-function isExcluded(path, patterns) {
+function matchesAnyGlob(path, patterns) {
     return patterns.some((pattern) => globMatch(pattern, path));
+}
+function isExcluded(path, patterns) {
+    return matchesAnyGlob(path, patterns);
 }
 function globMatch(pattern, path) {
     const re = new RegExp("^" +
@@ -30302,6 +30306,9 @@ const github = __importStar(__nccwpck_require__(3228));
 const ai_1 = __nccwpck_require__(2382);
 const diff_1 = __nccwpck_require__(9952);
 const github_1 = __nccwpck_require__(9248);
+const prompt_1 = __nccwpck_require__(705);
+const report_1 = __nccwpck_require__(665);
+const repo_1 = __nccwpck_require__(6783);
 function parsePatterns(raw) {
     return raw
         .split(/[\n,]/)
@@ -30313,19 +30320,48 @@ async function run() {
     const baseUrl = core.getInput("api-base-url") || "https://api.openai.com/v1";
     const model = core.getInput("model", { required: true });
     const githubToken = core.getInput("github-token", { required: true });
-    const systemPrompt = core.getInput("system-prompt");
+    const mode = (core.getInput("mode") || "pr").toLowerCase();
+    const systemPromptOverride = core.getInput("system-prompt");
     const maxFiles = Number.parseInt(core.getInput("max-files") || "50", 10);
     const exclude = parsePatterns(core.getInput("exclude"));
     const failOnFindings = core.getInput("fail-on-findings") === "true";
+    if (mode !== "pr" && mode !== "full") {
+        core.setFailed(`Modo inválido: "${mode}". Use "pr" ou "full".`);
+        return;
+    }
+    if (mode === "full") {
+        await runFullScan({
+            apiToken,
+            baseUrl,
+            model,
+            systemPromptOverride,
+            maxFiles,
+            exclude,
+            failOnFindings,
+        });
+        return;
+    }
+    await runPrReview({
+        apiToken,
+        baseUrl,
+        model,
+        githubToken,
+        systemPromptOverride,
+        maxFiles,
+        exclude,
+        failOnFindings,
+    });
+}
+async function runPrReview(opts) {
     const ctx = (0, github_1.getPrContext)();
     if (!ctx) {
         core.info("Nenhum pull request encontrado no contexto do evento; nada a revisar.");
         core.setOutput("findings-count", "0");
         return;
     }
-    const octokit = github.getOctokit(githubToken);
+    const octokit = github.getOctokit(opts.githubToken);
     core.info(`Buscando arquivos alterados do PR #${ctx.prNumber}...`);
-    const changed = await (0, github_1.listChangedFiles)(octokit, ctx, exclude, maxFiles);
+    const changed = await (0, github_1.listChangedFiles)(octokit, ctx, opts.exclude, opts.maxFiles);
     if (changed.length === 0) {
         core.info("Nenhum arquivo revisável neste PR.");
         core.setOutput("findings-count", "0");
@@ -30343,16 +30379,77 @@ async function run() {
         return;
     }
     const validLinesByFile = new Map(annotated.map((f) => [f.path, f.validLines]));
-    core.info(`Enviando ${annotated.length} arquivo(s) para o modelo ${model} revisar...`);
-    const client = new ai_1.AiClient({ baseUrl, token: apiToken, model, systemPrompt });
-    const result = await client.review((0, diff_1.renderDiff)(annotated));
+    core.info(`Enviando ${annotated.length} arquivo(s) para o modelo ${opts.model} revisar...`);
+    const client = new ai_1.AiClient({
+        baseUrl: opts.baseUrl,
+        token: opts.apiToken,
+        model: opts.model,
+        systemPrompt: opts.systemPromptOverride || prompt_1.DEFAULT_SYSTEM_PROMPT,
+    });
+    const result = await client.review((0, prompt_1.buildUserPrompt)((0, diff_1.renderDiff)(annotated)));
     core.info(`A IA retornou ${result.findings.length} achado(s).`);
     core.setOutput("findings-count", String(result.findings.length));
     const headSha = await (0, github_1.getHeadSha)(octokit, ctx);
     await (0, github_1.postReview)(octokit, ctx, headSha, result, validLinesByFile);
     core.info("Revisão postada no pull request.");
-    if (failOnFindings && result.findings.length > 0) {
+    if (opts.failOnFindings && result.findings.length > 0) {
         core.setFailed(`${result.findings.length} achado(s) reportado(s) pela revisão da IA.`);
+    }
+}
+async function runFullScan(opts) {
+    const maxFileBytes = Number.parseInt(core.getInput("max-file-bytes") || "100000", 10);
+    const maxCharsPerRequest = Number.parseInt(core.getInput("max-chars-per-request") || "100000", 10);
+    const include = parsePatterns(core.getInput("include"));
+    const reportPath = core.getInput("report-path") || "scaia-report.md";
+    core.info("Listando arquivos versionados do repositório...");
+    let files;
+    try {
+        files = (0, repo_1.listRepoFiles)();
+    }
+    catch (err) {
+        core.setFailed(`Falha ao listar arquivos com "git ls-files". O repositório foi clonado com actions/checkout? ${err instanceof Error ? err.message : String(err)}`);
+        return;
+    }
+    const selected = files
+        .filter((p) => include.length === 0 || (0, github_1.matchesAnyGlob)(p, include))
+        .filter((p) => !(0, github_1.matchesAnyGlob)(p, opts.exclude))
+        .slice(0, opts.maxFiles);
+    const annotated = [];
+    for (const path of selected) {
+        const a = (0, repo_1.annotateRepoFile)(path, maxFileBytes);
+        if (a)
+            annotated.push(a);
+    }
+    if (annotated.length === 0) {
+        core.info("Nenhum arquivo de texto elegível encontrado para escanear.");
+        core.setOutput("findings-count", "0");
+        return;
+    }
+    const batches = (0, repo_1.batchFiles)(annotated, maxCharsPerRequest);
+    core.info(`Escaneando ${annotated.length} arquivo(s) em ${batches.length} lote(s) com o modelo ${opts.model}...`);
+    const client = new ai_1.AiClient({
+        baseUrl: opts.baseUrl,
+        token: opts.apiToken,
+        model: opts.model,
+        systemPrompt: opts.systemPromptOverride || prompt_1.DEFAULT_FULL_SYSTEM_PROMPT,
+    });
+    const merged = { summary: "", findings: [] };
+    const summaries = [];
+    for (let i = 0; i < batches.length; i++) {
+        core.info(`Revisando lote ${i + 1}/${batches.length}...`);
+        const result = await client.review((0, prompt_1.buildFullUserPrompt)((0, diff_1.renderDiff)(batches[i])));
+        merged.findings.push(...result.findings);
+        if (result.summary)
+            summaries.push(result.summary);
+    }
+    merged.summary = summaries.join(" ");
+    core.info(`A IA retornou ${merged.findings.length} achado(s).`);
+    core.setOutput("findings-count", String(merged.findings.length));
+    await (0, report_1.reportScanResults)(merged, reportPath);
+    core.setOutput("report-path", reportPath);
+    core.info(`Relatório do scan gerado em ${reportPath} e no Job Summary.`);
+    if (opts.failOnFindings && merged.findings.length > 0) {
+        core.setFailed(`${merged.findings.length} achado(s) reportado(s) pela revisão da IA.`);
     }
 }
 run().catch((err) => {
@@ -30368,8 +30465,9 @@ run().catch((err) => {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.DEFAULT_SYSTEM_PROMPT = void 0;
+exports.DEFAULT_FULL_SYSTEM_PROMPT = exports.DEFAULT_SYSTEM_PROMPT = void 0;
 exports.buildUserPrompt = buildUserPrompt;
+exports.buildFullUserPrompt = buildFullUserPrompt;
 exports.DEFAULT_SYSTEM_PROMPT = `Você é o SCAIA, um revisor de código sênior, preciso e pragmático.
 
 Você recebe os arquivos alterados de um pull request do GitHub como diffs no
@@ -30406,6 +30504,217 @@ Regras:
 - Responda somente com JSON válido.`;
 function buildUserPrompt(diffText) {
     return `Aqui estão as mudanças do pull request para revisar.\n\n${diffText}`;
+}
+exports.DEFAULT_FULL_SYSTEM_PROMPT = `Você é o SCAIA, um revisor de código sênior, preciso e pragmático.
+
+Você recebe arquivos completos de um repositório do GitHub. Cada linha de cada
+arquivo vem anotada com o seu número no arquivo, no formato:
+
+  <numeroDaLinha>: <codigo>
+
+Revise o código exibido. Foque em problemas reais, em ordem de prioridade: bugs
+de correção, problemas de segurança, perda de dados, tratamento de erros quebrado
+e, depois, problemas claros de manutenibilidade ou performance. Não comente sobre
+estilo, formatação ou coisas que um linter pegaria. Não elogie. Se um arquivo
+parecer correto, não diga nada sobre ele.
+
+Você DEVE responder com um único objeto JSON e nada mais (sem blocos de markdown,
+sem texto fora do JSON). O objeto tem exatamente este formato:
+
+{
+  "summary": "<resumo geral da revisão em 1 a 3 frases>",
+  "findings": [
+    {
+      "path": "<caminho do arquivo exatamente como recebido>",
+      "line": <número inteiro da linha, vindo das anotações>,
+      "severity": "critical" | "high" | "medium" | "low",
+      "comment": "<explicação concisa do problema e uma correção concreta>"
+    }
+  ]
+}
+
+Regras:
+- "line" deve ser um dos números de linha anotados daquele arquivo. Nunca invente números de linha.
+- Mantenha cada comentário curto e acionável. Aponte o problema exato.
+- Se não houver problemas, retorne um array "findings" vazio.
+- Responda somente com JSON válido.`;
+function buildFullUserPrompt(diffText) {
+    return `Aqui estão os arquivos do repositório para revisar.\n\n${diffText}`;
+}
+
+
+/***/ }),
+
+/***/ 6783:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/**
+ * Suporte ao modo "full": lê os arquivos versionados do repositório a partir do
+ * checkout no runner e os prepara para a IA com numeração de linha, no mesmo
+ * formato consumido por `renderDiff`.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.listRepoFiles = listRepoFiles;
+exports.annotateRepoFile = annotateRepoFile;
+exports.batchFiles = batchFiles;
+const node_child_process_1 = __nccwpck_require__(1421);
+const node_fs_1 = __nccwpck_require__(3024);
+/** Lista os arquivos versionados via `git ls-files`, respeitando o .gitignore. */
+function listRepoFiles(cwd) {
+    const out = (0, node_child_process_1.execFileSync)("git", ["ls-files", "-z"], {
+        cwd,
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+    });
+    return out.split("\0").filter(Boolean);
+}
+/**
+ * Lê um arquivo do disco e o anota com números de linha (base 1). Retorna null
+ * para arquivos grandes demais ou que parecem binários. Como é um arquivo
+ * completo, toda linha é um alvo válido de comentário.
+ */
+function annotateRepoFile(path, maxBytes) {
+    let size;
+    try {
+        size = (0, node_fs_1.statSync)(path).size;
+    }
+    catch {
+        return null;
+    }
+    if (size > maxBytes)
+        return null;
+    let content;
+    try {
+        content = (0, node_fs_1.readFileSync)(path, "utf8");
+    }
+    catch {
+        return null;
+    }
+    // Heurística simples para pular binários: presença de byte nulo.
+    if (content.includes(String.fromCharCode(0)))
+        return null;
+    const validLines = new Set();
+    const out = [];
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+        const lineNo = i + 1;
+        validLines.add(lineNo);
+        out.push(`${String(lineNo).padStart(5, " ")}: ${lines[i]}`);
+    }
+    return { path, annotated: out.join("\n"), validLines };
+}
+/**
+ * Quebra os arquivos anotados em lotes cujo tamanho renderizado fica abaixo do
+ * orçamento de caracteres, para que cada requisição à IA caiba no contexto.
+ */
+function batchFiles(files, maxChars) {
+    const batches = [];
+    let current = [];
+    let currentChars = 0;
+    for (const file of files) {
+        const cost = file.annotated.length + file.path.length + 32;
+        if (current.length > 0 && currentChars + cost > maxChars) {
+            batches.push(current);
+            current = [];
+            currentChars = 0;
+        }
+        current.push(file);
+        currentChars += cost;
+    }
+    if (current.length > 0)
+        batches.push(current);
+    return batches;
+}
+
+
+/***/ }),
+
+/***/ 665:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Saída do modo "full": como não há pull request para comentar, os achados são
+ * escritos em um arquivo de relatório Markdown no workspace (que pode virar um
+ * artifact do workflow) e resumidos no Job Summary.
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.reportScanResults = reportScanResults;
+const node_fs_1 = __nccwpck_require__(3024);
+const core = __importStar(__nccwpck_require__(7484));
+const SEVERITY_LABEL = {
+    critical: "🔴 Crítico",
+    high: "🟠 Alto",
+    medium: "🟡 Médio",
+    low: "🔵 Baixo",
+};
+const SEVERITY_ORDER = ["critical", "high", "medium", "low"];
+/** Gera o relatório do scan: arquivo Markdown + Job Summary. */
+async function reportScanResults(result, reportPath) {
+    const markdown = buildMarkdown(result);
+    (0, node_fs_1.writeFileSync)(reportPath, markdown, "utf8");
+    core.info(`Relatório gravado em ${reportPath}`);
+    await core.summary.addRaw(markdown).write();
+}
+/** Monta o corpo do relatório em Markdown, com achados agrupados por severidade. */
+function buildMarkdown(result) {
+    const lines = ["# 🤖 Revisão do SCAIA — repositório inteiro", ""];
+    if (result.summary)
+        lines.push(result.summary, "");
+    const total = result.findings.length;
+    if (total === 0) {
+        lines.push("Nenhum problema encontrado. ✅");
+        return lines.join("\n");
+    }
+    const counts = SEVERITY_ORDER.map((sev) => `${SEVERITY_LABEL[sev]}: ${result.findings.filter((f) => f.severity === sev).length}`);
+    lines.push(`**Total de achados: ${total}** (${counts.join(" · ")})`, "");
+    for (const sev of SEVERITY_ORDER) {
+        const group = result.findings.filter((f) => f.severity === sev);
+        if (group.length === 0)
+            continue;
+        lines.push(`## ${SEVERITY_LABEL[sev]} (${group.length})`, "");
+        for (const f of group) {
+            lines.push(`- \`${f.path}:${f.line}\` — ${f.comment}`);
+        }
+        lines.push("");
+    }
+    return lines.join("\n").trimEnd() + "\n";
 }
 
 
@@ -30515,6 +30824,14 @@ module.exports = require("net");
 
 /***/ }),
 
+/***/ 1421:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:child_process");
+
+/***/ }),
+
 /***/ 7598:
 /***/ ((module) => {
 
@@ -30528,6 +30845,14 @@ module.exports = require("node:crypto");
 
 "use strict";
 module.exports = require("node:events");
+
+/***/ }),
+
+/***/ 3024:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:fs");
 
 /***/ }),
 
