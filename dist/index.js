@@ -29994,20 +29994,56 @@ function parseReview(content) {
         const f = item;
         const path = typeof f.path === "string" ? f.path : "";
         const line = typeof f.line === "number" ? f.line : Number(f.line);
-        const comment = typeof f.comment === "string" ? f.comment : "";
-        if (!path || !Number.isFinite(line) || !comment)
+        // "explanation" é o campo novo; "comment" é aceito por compatibilidade.
+        const explanation = str(f.explanation) || str(f.comment);
+        if (!path || !Number.isFinite(line) || !explanation)
             continue;
         findings.push({
             path,
             line,
             severity: normalizeSeverity(f.severity),
-            comment,
+            vulnerability: str(f.vulnerability) || str(f.title) || "Problema",
+            confidence: normalizeConfidence(f.confidence),
+            explanation,
+            evidence: str(f.evidence) || undefined,
+            cwe: normalizeCwe(f.cwe),
+            fix: str(f.fix) || undefined,
+            fixCode: str(f.fix_code) || undefined,
+            fixStartLine: intOrUndefined(f.fix_start_line),
         });
     }
     return {
         summary: typeof obj.summary === "string" ? obj.summary : "",
         findings,
     };
+}
+/** Coage o valor para uma string limpa, retornando "" quando vazio/ausente. */
+function str(value) {
+    return typeof value === "string" ? value.trim() : "";
+}
+/** Converte o valor em inteiro finito, ou undefined quando ausente/inválido. */
+function intOrUndefined(value) {
+    const n = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(n) ? Math.trunc(n) : undefined;
+}
+/** Normaliza a confiança para o intervalo [0, 1], aceitando 0–100 ou "91%". */
+function normalizeConfidence(value) {
+    let n = typeof value === "number"
+        ? value
+        : Number(String(value ?? "").replace(/%$/, ""));
+    if (!Number.isFinite(n))
+        return 0.5;
+    if (n > 1)
+        n = n / 100;
+    return Math.min(1, Math.max(0, n));
+}
+/** Normaliza o CWE para o formato "CWE-89", ou undefined quando ausente. */
+function normalizeCwe(value) {
+    const s = str(value);
+    if (!s)
+        return undefined;
+    const m = /(\d+)/.exec(s);
+    return m ? `CWE-${m[1]}` : s;
 }
 function normalizeSeverity(value) {
     const s = String(value).toLowerCase();
@@ -30097,6 +30133,72 @@ function renderDiff(files) {
 
 /***/ }),
 
+/***/ 6264:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Formatação compartilhada dos achados em Markdown, usada tanto nos comentários
+ * do pull request quanto no relatório do modo "full".
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.SEVERITY_ORDER = exports.SEVERITY_LABEL = void 0;
+exports.confidencePct = confidencePct;
+exports.findingTitle = findingTitle;
+exports.renderFinding = renderFinding;
+exports.SEVERITY_LABEL = {
+    critical: "🔴 Crítico",
+    high: "🟠 Alto",
+    medium: "🟡 Médio",
+    low: "🔵 Baixo",
+};
+exports.SEVERITY_ORDER = [
+    "critical",
+    "high",
+    "medium",
+    "low",
+];
+/** Formata a confiança (0–1) como porcentagem inteira, ex.: "91%". */
+function confidencePct(confidence) {
+    return `${Math.round(confidence * 100)}%`;
+}
+/** Linha de cabeçalho de um achado: severidade, título, confiança e CWE. */
+function findingTitle(f) {
+    const parts = [`${exports.SEVERITY_LABEL[f.severity]} — **${f.vulnerability}**`];
+    parts.push(`(confiança ${confidencePct(f.confidence)})`);
+    if (f.cwe)
+        parts.push(`\`${f.cwe}\``);
+    return parts.join(" ");
+}
+/** Renderiza um achado completo em Markdown. */
+function renderFinding(f, opts = {}) {
+    const lines = [findingTitle(f)];
+    if (opts.withLocation)
+        lines.push("", `\`${f.path}:${f.line}\``);
+    lines.push("", f.explanation);
+    if (f.evidence) {
+        lines.push("", "**Evidência:**", "```", f.evidence, "```");
+    }
+    if (f.fixCode && opts.asSuggestion) {
+        if (f.fix)
+            lines.push("", `**Correção:** ${f.fix}`);
+        lines.push("", "```suggestion", f.fixCode, "```");
+    }
+    else if (f.fixCode) {
+        if (f.fix)
+            lines.push("", `**Correção:** ${f.fix}`);
+        lines.push("", "```", f.fixCode, "```");
+    }
+    else if (f.fix) {
+        lines.push("", `**Correção:** ${f.fix}`);
+    }
+    return lines.join("\n");
+}
+
+
+/***/ }),
+
 /***/ 9248:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -30142,6 +30244,7 @@ exports.getHeadSha = getHeadSha;
 exports.postReview = postReview;
 exports.matchesAnyGlob = matchesAnyGlob;
 const github = __importStar(__nccwpck_require__(3228));
+const format_1 = __nccwpck_require__(6264);
 /** Resolve o contexto do pull request a partir do payload do evento do workflow. */
 function getPrContext() {
     const { payload, repo } = github.context;
@@ -30184,12 +30287,22 @@ async function postReview(octokit, ctx, commitId, result, validLinesByFile) {
     for (const f of result.findings) {
         const valid = validLinesByFile.get(f.path);
         if (valid && valid.has(f.line)) {
-            inline.push({
+            // Só vira ```suggestion se TODAS as linhas que ela substitui estão no diff.
+            const start = f.fixStartLine && f.fixStartLine < f.line ? f.fixStartLine : undefined;
+            const rangeValid = start === undefined ||
+                rangeInDiff(valid, start, f.line);
+            const asSuggestion = Boolean(f.fixCode) && rangeValid;
+            const comment = {
                 path: f.path,
                 line: f.line,
                 side: "RIGHT",
-                body: `**${severityLabel(f.severity)}** ${f.comment}`,
-            });
+                body: (0, format_1.renderFinding)(f, { asSuggestion }),
+            };
+            if (asSuggestion && start !== undefined) {
+                comment.start_line = start;
+                comment.start_side = "RIGHT";
+            }
+            inline.push(comment);
         }
         else {
             orphaned.push(f);
@@ -30217,24 +30330,20 @@ function buildSummaryBody(result, orphaned, inlineCount) {
     }
     lines.push("", `Reportado(s) ${total} achado(s); ${inlineCount} postado(s) inline.`);
     if (orphaned.length > 0) {
-        lines.push("", "### Achados fora do alcance do diff");
+        lines.push("", "### Achados fora do alcance do diff", "");
         for (const f of orphaned) {
-            lines.push(`- **${severityLabel(f.severity)}** \`${f.path}:${f.line}\` — ${f.comment}`);
+            lines.push((0, format_1.renderFinding)(f, { withLocation: true }), "");
         }
     }
-    return lines.join("\n");
+    return lines.join("\n").trimEnd();
 }
-function severityLabel(sev) {
-    switch (sev) {
-        case "critical":
-            return "🔴 Crítico:";
-        case "high":
-            return "🟠 Alto:";
-        case "medium":
-            return "🟡 Médio:";
-        case "low":
-            return "🔵 Baixo:";
+/** Verifica se todas as linhas de [start, end] são comentáveis no diff. */
+function rangeInDiff(valid, start, end) {
+    for (let n = start; n <= end; n++) {
+        if (!valid.has(n))
+            return false;
     }
+    return true;
 }
 /** Matcher de glob bem pequeno, com suporte a segmentos "*" e "**". */
 function matchesAnyGlob(path, patterns) {
@@ -30491,16 +30600,28 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
     {
       "path": "<caminho do arquivo exatamente como recebido>",
       "line": <número inteiro da linha, vindo das anotações do lado NOVO>,
+      "vulnerability": "<título curto do tipo do problema, ex.: SQL Injection>",
       "severity": "critical" | "high" | "medium" | "low",
-      "comment": "<explicação concisa do problema e uma correção concreta>"
+      "confidence": <número de 0 a 1 indicando sua confiança no achado>,
+      "explanation": "<explicação concisa do porquê isto é um problema>",
+      "evidence": "<trecho de código relevante que demonstra o problema>",
+      "cwe": "<identificador CWE quando aplicável, ex.: CWE-89, senão omita>",
+      "fix": "<descrição curta da correção sugerida>",
+      "fix_code": "<código exato que substitui a(s) linha(s) do problema, quando você puder produzir uma correção direta; senão omita>",
+      "fix_start_line": <primeira linha substituída por fix_code, para correções multi-linha; omita se for só a linha em "line">
     }
   ]
 }
 
 Regras:
 - "line" deve ser um dos números de linha anotados daquele arquivo. Nunca invente números de linha.
-- Mantenha cada comentário curto e acionável. Aponte o problema exato.
-- Escreva os campos "summary" e "comment" SEMPRE em português do Brasil, independentemente do idioma do código ou dos comentários.
+- "confidence" é um número entre 0 e 1 (ex.: 0.91). Seja honesto: baixa confiança para suspeitas, alta para problemas claros.
+- "cwe" só quando houver um CWE pertinente; caso contrário, omita o campo.
+- "evidence" deve citar o trecho exato do código exibido, não invente.
+- "fix_code" deve conter APENAS o código de substituição (sem o prefixo "<número>: " das anotações), preservando a indentação original, pronto para substituir exatamente as linhas indicadas. Use quando conseguir dar uma correção concreta; se a correção exigir contexto que você não tem, omita "fix_code" e descreva em "fix".
+- Para uma correção que abrange várias linhas, defina "fix_start_line" como a primeira linha substituída e "line" como a última; ambas devem ser linhas anotadas contíguas.
+- Mantenha cada campo curto e acionável. Aponte o problema exato.
+- Escreva "summary", "vulnerability", "explanation" e "fix" SEMPRE em português do Brasil, independentemente do idioma do código.
 - Se não houver problemas, retorne um array "findings" vazio.
 - Responda somente com JSON válido.`;
 function buildUserPrompt(diffText) {
@@ -30528,16 +30649,28 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
     {
       "path": "<caminho do arquivo exatamente como recebido>",
       "line": <número inteiro da linha, vindo das anotações>,
+      "vulnerability": "<título curto do tipo do problema, ex.: SQL Injection>",
       "severity": "critical" | "high" | "medium" | "low",
-      "comment": "<explicação concisa do problema e uma correção concreta>"
+      "confidence": <número de 0 a 1 indicando sua confiança no achado>,
+      "explanation": "<explicação concisa do porquê isto é um problema>",
+      "evidence": "<trecho de código relevante que demonstra o problema>",
+      "cwe": "<identificador CWE quando aplicável, ex.: CWE-89, senão omita>",
+      "fix": "<descrição curta da correção sugerida>",
+      "fix_code": "<código exato que substitui a(s) linha(s) do problema, quando você puder produzir uma correção direta; senão omita>",
+      "fix_start_line": <primeira linha substituída por fix_code, para correções multi-linha; omita se for só a linha em "line">
     }
   ]
 }
 
 Regras:
 - "line" deve ser um dos números de linha anotados daquele arquivo. Nunca invente números de linha.
-- Mantenha cada comentário curto e acionável. Aponte o problema exato.
-- Escreva os campos "summary" e "comment" SEMPRE em português do Brasil, independentemente do idioma do código ou dos comentários.
+- "confidence" é um número entre 0 e 1 (ex.: 0.91). Seja honesto: baixa confiança para suspeitas, alta para problemas claros.
+- "cwe" só quando houver um CWE pertinente; caso contrário, omita o campo.
+- "evidence" deve citar o trecho exato do código exibido, não invente.
+- "fix_code" deve conter APENAS o código de substituição (sem o prefixo "<número>: " das anotações), preservando a indentação original, pronto para substituir exatamente as linhas indicadas. Use quando conseguir dar uma correção concreta; se a correção exigir contexto que você não tem, omita "fix_code" e descreva em "fix".
+- Para uma correção que abrange várias linhas, defina "fix_start_line" como a primeira linha substituída e "line" como a última; ambas devem ser linhas anotadas contíguas.
+- Mantenha cada campo curto e acionável. Aponte o problema exato.
+- Escreva "summary", "vulnerability", "explanation" e "fix" SEMPRE em português do Brasil, independentemente do idioma do código.
 - Se não houver problemas, retorne um array "findings" vazio.
 - Responda somente com JSON válido.`;
 function buildFullUserPrompt(diffText) {
@@ -30680,13 +30813,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.reportScanResults = reportScanResults;
 const node_fs_1 = __nccwpck_require__(3024);
 const core = __importStar(__nccwpck_require__(7484));
-const SEVERITY_LABEL = {
-    critical: "🔴 Crítico",
-    high: "🟠 Alto",
-    medium: "🟡 Médio",
-    low: "🔵 Baixo",
-};
-const SEVERITY_ORDER = ["critical", "high", "medium", "low"];
+const format_1 = __nccwpck_require__(6264);
 /** Gera o relatório do scan: arquivo Markdown + Job Summary. */
 async function reportScanResults(result, reportPath) {
     const markdown = buildMarkdown(result);
@@ -30704,17 +30831,16 @@ function buildMarkdown(result) {
         lines.push("Nenhum problema encontrado. ✅");
         return lines.join("\n");
     }
-    const counts = SEVERITY_ORDER.map((sev) => `${SEVERITY_LABEL[sev]}: ${result.findings.filter((f) => f.severity === sev).length}`);
+    const counts = format_1.SEVERITY_ORDER.map((sev) => `${format_1.SEVERITY_LABEL[sev]}: ${result.findings.filter((f) => f.severity === sev).length}`);
     lines.push(`**Total de achados: ${total}** (${counts.join(" · ")})`, "");
-    for (const sev of SEVERITY_ORDER) {
+    for (const sev of format_1.SEVERITY_ORDER) {
         const group = result.findings.filter((f) => f.severity === sev);
         if (group.length === 0)
             continue;
-        lines.push(`## ${SEVERITY_LABEL[sev]} (${group.length})`, "");
+        lines.push(`## ${format_1.SEVERITY_LABEL[sev]} (${group.length})`, "");
         for (const f of group) {
-            lines.push(`- \`${f.path}:${f.line}\` — ${f.comment}`);
+            lines.push((0, format_1.renderFinding)(f, { withLocation: true }), "");
         }
-        lines.push("");
     }
     return lines.join("\n").trimEnd() + "\n";
 }

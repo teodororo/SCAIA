@@ -1,6 +1,7 @@
 import * as github from "@actions/github";
 import type { ChangedFile } from "./diff";
 import type { Finding, ReviewResult } from "./ai";
+import { renderFinding } from "./format";
 
 type Octokit = ReturnType<typeof github.getOctokit>;
 
@@ -65,18 +66,39 @@ export async function postReview(
   result: ReviewResult,
   validLinesByFile: Map<string, Set<number>>
 ): Promise<void> {
-  const inline: { path: string; line: number; side: "RIGHT"; body: string }[] = [];
+  interface InlineComment {
+    path: string;
+    line: number;
+    side: "RIGHT";
+    body: string;
+    start_line?: number;
+    start_side?: "RIGHT";
+  }
+  const inline: InlineComment[] = [];
   const orphaned: Finding[] = [];
 
   for (const f of result.findings) {
     const valid = validLinesByFile.get(f.path);
     if (valid && valid.has(f.line)) {
-      inline.push({
+      // Só vira ```suggestion se TODAS as linhas que ela substitui estão no diff.
+      const start =
+        f.fixStartLine && f.fixStartLine < f.line ? f.fixStartLine : undefined;
+      const rangeValid =
+        start === undefined ||
+        rangeInDiff(valid, start, f.line);
+      const asSuggestion = Boolean(f.fixCode) && rangeValid;
+
+      const comment: InlineComment = {
         path: f.path,
         line: f.line,
         side: "RIGHT",
-        body: `**${severityLabel(f.severity)}** ${f.comment}`,
-      });
+        body: renderFinding(f, { asSuggestion }),
+      };
+      if (asSuggestion && start !== undefined) {
+        comment.start_line = start;
+        comment.start_side = "RIGHT";
+      }
+      inline.push(comment);
     } else {
       orphaned.push(f);
     }
@@ -112,28 +134,21 @@ function buildSummaryBody(
   lines.push("", `Reportado(s) ${total} achado(s); ${inlineCount} postado(s) inline.`);
 
   if (orphaned.length > 0) {
-    lines.push("", "### Achados fora do alcance do diff");
+    lines.push("", "### Achados fora do alcance do diff", "");
     for (const f of orphaned) {
-      lines.push(
-        `- **${severityLabel(f.severity)}** \`${f.path}:${f.line}\` — ${f.comment}`
-      );
+      lines.push(renderFinding(f, { withLocation: true }), "");
     }
   }
 
-  return lines.join("\n");
+  return lines.join("\n").trimEnd();
 }
 
-function severityLabel(sev: Finding["severity"]): string {
-  switch (sev) {
-    case "critical":
-      return "🔴 Crítico:";
-    case "high":
-      return "🟠 Alto:";
-    case "medium":
-      return "🟡 Médio:";
-    case "low":
-      return "🔵 Baixo:";
+/** Verifica se todas as linhas de [start, end] são comentáveis no diff. */
+function rangeInDiff(valid: Set<number>, start: number, end: number): boolean {
+  for (let n = start; n <= end; n++) {
+    if (!valid.has(n)) return false;
   }
+  return true;
 }
 
 /** Matcher de glob bem pequeno, com suporte a segmentos "*" e "**". */

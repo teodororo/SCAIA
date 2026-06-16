@@ -4,7 +4,28 @@ export interface Finding {
   path: string;
   line: number;
   severity: "critical" | "high" | "medium" | "low";
-  comment: string;
+  /** Título/tipo do problema, ex.: "SQL Injection". */
+  vulnerability: string;
+  /** Confiança do modelo no achado, de 0 a 1. */
+  confidence: number;
+  /** Explicação concisa do problema. */
+  explanation: string;
+  /** Trecho de código que evidencia o problema. */
+  evidence?: string;
+  /** Identificador CWE, ex.: "CWE-89". */
+  cwe?: string;
+  /** Correção concreta sugerida (descrição em texto). */
+  fix?: string;
+  /**
+   * Código exato que substitui a(s) linha(s) indicada(s). Quando o achado está
+   * sobre uma linha comentável do diff, vira um bloco ```suggestion do GitHub.
+   */
+  fixCode?: string;
+  /**
+   * Primeira linha substituída pelo `fixCode`, para sugestões multi-linha.
+   * Quando ausente, a sugestão substitui apenas `line`.
+   */
+  fixStartLine?: number;
 }
 
 export interface ReviewResult {
@@ -91,13 +112,21 @@ export function parseReview(content: string): ReviewResult {
     const f = item as Record<string, unknown>;
     const path = typeof f.path === "string" ? f.path : "";
     const line = typeof f.line === "number" ? f.line : Number(f.line);
-    const comment = typeof f.comment === "string" ? f.comment : "";
-    if (!path || !Number.isFinite(line) || !comment) continue;
+    // "explanation" é o campo novo; "comment" é aceito por compatibilidade.
+    const explanation = str(f.explanation) || str(f.comment);
+    if (!path || !Number.isFinite(line) || !explanation) continue;
     findings.push({
       path,
       line,
       severity: normalizeSeverity(f.severity),
-      comment,
+      vulnerability: str(f.vulnerability) || str(f.title) || "Problema",
+      confidence: normalizeConfidence(f.confidence),
+      explanation,
+      evidence: str(f.evidence) || undefined,
+      cwe: normalizeCwe(f.cwe),
+      fix: str(f.fix) || undefined,
+      fixCode: str(f.fix_code) || undefined,
+      fixStartLine: intOrUndefined(f.fix_start_line),
     });
   }
 
@@ -105,6 +134,36 @@ export function parseReview(content: string): ReviewResult {
     summary: typeof obj.summary === "string" ? obj.summary : "",
     findings,
   };
+}
+
+/** Coage o valor para uma string limpa, retornando "" quando vazio/ausente. */
+function str(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** Converte o valor em inteiro finito, ou undefined quando ausente/inválido. */
+function intOrUndefined(value: unknown): number | undefined {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? Math.trunc(n) : undefined;
+}
+
+/** Normaliza a confiança para o intervalo [0, 1], aceitando 0–100 ou "91%". */
+function normalizeConfidence(value: unknown): number {
+  let n =
+    typeof value === "number"
+      ? value
+      : Number(String(value ?? "").replace(/%$/, ""));
+  if (!Number.isFinite(n)) return 0.5;
+  if (n > 1) n = n / 100;
+  return Math.min(1, Math.max(0, n));
+}
+
+/** Normaliza o CWE para o formato "CWE-89", ou undefined quando ausente. */
+function normalizeCwe(value: unknown): string | undefined {
+  const s = str(value);
+  if (!s) return undefined;
+  const m = /(\d+)/.exec(s);
+  return m ? `CWE-${m[1]}` : s;
 }
 
 function normalizeSeverity(value: unknown): Finding["severity"] {

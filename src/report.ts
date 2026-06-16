@@ -6,16 +6,8 @@
 
 import { writeFileSync } from "node:fs";
 import * as core from "@actions/core";
-import type { Finding, ReviewResult } from "./ai";
-
-const SEVERITY_LABEL: Record<Finding["severity"], string> = {
-  critical: "🔴 Crítico",
-  high: "🟠 Alto",
-  medium: "🟡 Médio",
-  low: "🔵 Baixo",
-};
-
-const SEVERITY_ORDER: Finding["severity"][] = ["critical", "high", "medium", "low"];
+import type { ReviewResult } from "./ai";
+import { SEVERITY_LABEL, SEVERITY_ORDER, renderFinding } from "./format";
 
 /** Gera o relatório do scan: arquivo Markdown + Job Summary. */
 export async function reportScanResults(
@@ -52,9 +44,8 @@ function buildMarkdown(result: ReviewResult): string {
     if (group.length === 0) continue;
     lines.push(`## ${SEVERITY_LABEL[sev]} (${group.length})`, "");
     for (const f of group) {
-      lines.push(`- \`${f.path}:${f.line}\` — ${f.comment}`);
+      lines.push(renderFinding(f, { withLocation: true }), "");
     }
-    lines.push("");
   }
 
   return lines.join("\n").trimEnd() + "\n";
