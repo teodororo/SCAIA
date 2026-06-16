@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SCAIA — Revisão de Código por IA</title>
+  <meta name="description" content="GitHub Action que revisa pull requests com IA. Traga seu token, aponte para qualquer endpoint OpenAI-compatível." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Dark theme (default) ── */
+    [data-theme="dark"] {
+      --bg: #0d1117;
+      --bg-surface: #161b22;
+      --bg-overlay: #1c2128;
+      --border: #30363d;
+      --border-subtle: #21262d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --text-dim: #484f58;
+      --accent: #7c3aed;
+      --accent-glow: #a855f7;
+      --accent-dim: #2d1b69;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --red: #f85149;
+      --blue: #58a6ff;
+      --nav-bg: rgba(13,17,23,.93);
+      --code-kw: #ff7b72;
+      --code-str: #a5d6ff;
+      --code-key: #79c0ff;
+      --shadow-toggle: rgba(0,0,0,.4);
+    }
+
+    /* ── Light theme ── */
+    [data-theme="light"] {
+      --bg: #ffffff;
+      --bg-surface: #f6f8fa;
+      --bg-overlay: #eaeef2;
+      --border: #d0d7de;
+      --border-subtle: #e8ecf0;
+      --text: #1f2328;
+      --text-muted: #656d76;
+      --text-dim: #adb3ba;
+      --accent: #6024c4;
+      --accent-glow: #7c3aed;
+      --accent-dim: #ddd6fe;
+      --green: #1a7f37;
+      --yellow: #9a6700;
+      --red: #cf222e;
+      --blue: #0969da;
+      --nav-bg: rgba(255,255,255,.93);
+      --code-kw: #cf222e;
+      --code-str: #0550ae;
+      --code-key: #0969da;
+      --shadow-toggle: rgba(0,0,0,.12);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 17px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+      transition: background .2s, color .2s;
+    }
+
+    /* ── Layout ── */
+    .wrap { max-width: 860px; margin: 0 auto; padding: 0 1.5rem; }
+
+    /* ── Nav ── */
+    nav {
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 1rem 0;
+      position: sticky;
+      top: 0;
+      background: var(--nav-bg);
+      backdrop-filter: blur(8px);
+      z-index: 10;
+    }
+    nav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .nav-brand { font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 1.05rem; color: var(--text); text-decoration: none; display: flex; align-items: center; gap: .5rem; }
+    .nav-brand span { color: var(--accent-glow); }
+    .nav-links { display: flex; gap: 1.5rem; align-items: center; }
+    .nav-links a { color: var(--text-muted); text-decoration: none; font-size: .9rem; transition: color .15s; }
+    .nav-links a:hover { color: var(--text); }
+
+    /* ── Theme toggle ── */
+    .theme-toggle {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      width: 52px; height: 28px;
+      cursor: pointer;
+      position: relative;
+      transition: background .2s, border-color .2s;
+      flex-shrink: 0;
+    }
+    .theme-toggle::after {
+      content: '';
+      position: absolute;
+      top: 3px; left: 3px;
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: transform .2s, background .2s;
+    }
+    [data-theme="light"] .theme-toggle::after { transform: translateX(24px); background: var(--accent); }
+    .theme-toggle-icon {
+      position: absolute;
+      top: 50%; transform: translateY(-50%);
+      font-size: 11px;
+      pointer-events: none;
+      line-height: 1;
+    }
+    .icon-moon { left: 6px; }
+    .icon-sun  { right: 5px; }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: .45rem 1rem;
+      font-size: .9rem;
+      font-weight: 500;
+      text-decoration: none;
+      transition: background .15s;
+      white-space: nowrap;
+      font-family: 'IBM Plex Sans', sans-serif;
+    }
+    .btn-primary:hover { background: var(--accent-glow); }
+
+    /* ── Hero ── */
+    .hero { padding: 5rem 0 3.5rem; text-align: center; }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: .5rem;
+      border: 1px solid var(--accent-dim);
+      background: rgba(124,58,237,.08);
+      color: var(--accent-glow);
+      font-size: .8rem; font-family: 'IBM Plex Mono', monospace;
+      border-radius: 4px; padding: .3rem .9rem;
+      margin-bottom: 1.75rem;
+      letter-spacing: .04em;
+    }
+    [data-theme="light"] .hero-badge { background: var(--accent-dim); }
+    .hero-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-glow); flex-shrink: 0; }
+    h1 {
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: clamp(2rem, 5vw, 3.1rem);
+      font-weight: 600;
+      line-height: 1.15;
+      letter-spacing: -.025em;
+      margin-bottom: 1.25rem;
+    }
+    h1 em { color: var(--accent-glow); font-style: normal; }
+    .hero-sub {
+      color: var(--text-muted);
+      font-size: 1.15rem;
+      max-width: 540px;
+      margin: 0 auto 2.25rem;
+      line-height: 1.7;
+    }
+    .hero-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    .btn-ghost {
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: .6rem 1.25rem;
+      font-size: .95rem;
+      font-weight: 500;
+      text-decoration: none;
+      transition: border-color .15s, background .15s;
+      display: flex; align-items: center; gap: .4rem;
+      font-family: 'IBM Plex Sans', sans-serif;
+    }
+    .btn-ghost:hover { border-color: var(--text-muted); background: var(--bg-surface); }
+    .btn-lg { padding: .65rem 1.5rem; font-size: 1rem; }
+
+    /* ── Demo Block ── */
+    .demo-wrap { margin: 3rem 0 4rem; }
+    .demo-file-header {
+      background: var(--bg-overlay);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: 8px 8px 0 0;
+      padding: .6rem 1rem;
+      display: flex; align-items: center; gap: .5rem;
+      font-family: 'IBM Plex Mono', monospace; font-size: .8rem; color: var(--text-muted);
+    }
+    .demo-file-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .demo-body {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 0 0 8px 8px;
+      overflow: auto;
+      font-family: 'IBM Plex Mono', monospace; font-size: .85rem; line-height: 1.7;
+    }
+    .diff-line { display: flex; min-height: 1.5rem; transition: background .2s; }
+    .diff-line:hover { background: rgba(128,128,128,.04); }
+    .ln { color: var(--text-dim); width: 2.8rem; min-width: 2.8rem; text-align: right; padding: 0 .6rem; user-select: none; border-right: 1px solid var(--border-subtle); }
+    .diff-line.add { background: rgba(63,185,80,.07); }
+    [data-theme="light"] .diff-line.add { background: rgba(26,127,55,.07); }
+    .diff-line.add .ln { color: rgba(63,185,80,.5); }
+    [data-theme="light"] .diff-line.add .ln { color: rgba(26,127,55,.45); }
+    .diff-line.remove { background: rgba(248,81,73,.07); }
+    [data-theme="light"] .diff-line.remove { background: rgba(207,34,46,.07); }
+    .diff-line.remove .ln { color: rgba(248,81,73,.5); }
+    [data-theme="light"] .diff-line.remove .ln { color: rgba(207,34,46,.45); }
+    .diff-line.finding { background: rgba(124,58,237,.1); }
+    .code-content { padding: 0 1rem; color: var(--text); white-space: pre; }
+    .diff-line.add .code-content::before { content: '+  '; color: var(--green); }
+    .diff-line.remove .code-content::before { content: '-  '; color: var(--red); }
+    .diff-line:not(.add):not(.remove) .code-content::before { content: '   '; }
+
+    .ai-comment {
+      background: rgba(124,58,237,.12);
+      border-left: 3px solid var(--accent);
+      margin: 0; padding: .65rem 1rem;
+    }
+    [data-theme="light"] .ai-comment { background: rgba(124,58,237,.07); }
+    .ai-comment-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .3rem; }
+    .ai-avatar { width: 18px; height: 18px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 9px; color: white; font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
+    .ai-label { font-size: .75rem; color: var(--accent-glow); font-weight: 600; letter-spacing: .04em; font-family: 'IBM Plex Mono', monospace; }
+    .severity-badge { font-size: .68rem; padding: .1rem .45rem; border-radius: 3px; font-weight: 600; letter-spacing: .04em; font-family: 'IBM Plex Mono', monospace; }
+    .sev-warn { background: rgba(210,153,34,.18); color: var(--yellow); }
+    .sev-error { background: rgba(248,81,73,.18); color: var(--red); }
+    .ai-comment p { font-size: .84rem; color: var(--text-muted); line-height: 1.55; }
+
+    /* ── Sections ── */
+    .section { padding: 3.5rem 0; border-top: 1px solid var(--border-subtle); }
+    .section-label { font-family: 'IBM Plex Mono', monospace; font-size: .75rem; color: var(--accent-glow); letter-spacing: .1em; text-transform: uppercase; margin-bottom: .75rem; }
+    h2 { font-size: 1.7rem; font-weight: 600; line-height: 1.2; margin-bottom: .75rem; letter-spacing: -.02em; }
+    h2 .dim { color: var(--text-muted); }
+
+    /* ── Steps ── */
+    .steps { display: grid; gap: 1px; background: var(--border-subtle); border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden; margin-top: 2rem; }
+    .step { background: var(--bg-surface); padding: 1.25rem 1.5rem; display: flex; gap: 1.25rem; align-items: flex-start; }
+    .step-num { font-family: 'IBM Plex Mono', monospace; font-size: .75rem; color: var(--accent-glow); background: rgba(124,58,237,.12); border: 1px solid var(--accent-dim); border-radius: 3px; padding: .2rem .5rem; min-width: 2.2rem; text-align: center; margin-top: .15rem; flex-shrink: 0; }
+    [data-theme="light"] .step-num { background: var(--accent-dim); }
+    .step h3 { font-size: 1rem; font-weight: 600; margin-bottom: .25rem; }
+    .step p { font-size: .9rem; color: var(--text-muted); line-height: 1.55; }
+
+    /* ── Code block ── */
+    .code-block { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; overflow: auto; font-family: 'IBM Plex Mono', monospace; font-size: .85rem; line-height: 1.75; }
+    .code-block-header { background: var(--bg-overlay); border-bottom: 1px solid var(--border); padding: .5rem 1rem; display: flex; align-items: center; justify-content: space-between; }
+    .code-block-title { font-size: .78rem; color: var(--text-muted); font-family: 'IBM Plex Mono', monospace; }
+    .copy-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: 4px; padding: .2rem .65rem; font-size: .75rem; cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; transition: color .15s, border-color .15s; }
+    .copy-btn:hover { color: var(--text); border-color: var(--text-muted); }
+    .code-block pre { padding: 1rem 1.25rem; overflow: auto; }
+    .code-block .kw { color: var(--code-kw); }
+    .code-block .str { color: var(--code-str); }
+    .code-block .cm { color: var(--text-dim); }
+    .code-block .key { color: var(--code-key); }
+    .code-block .op { color: var(--text-muted); }
+
+    /* ── Tabs ── */
+    .tabs { display: flex; gap: .25rem; margin-bottom: -1px; position: relative; z-index: 1; }
+    .tab { font-size: .84rem; padding: .5rem 1rem; cursor: pointer; border-radius: 6px 6px 0 0; border: 1px solid transparent; color: var(--text-muted); background: none; font-family: 'IBM Plex Sans', sans-serif; transition: color .15s; border-bottom: none; }
+    .tab.active { background: var(--bg-surface); border-color: var(--border); color: var(--text); }
+    .tab:not(.active):hover { color: var(--text); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* ── Inputs table ── */
+    .inputs-table { width: 100%; border-collapse: collapse; margin-top: 1.5rem; font-size: .9rem; }
+    .inputs-table th { text-align: left; font-size: .75rem; font-weight: 600; color: var(--text-muted); letter-spacing: .06em; text-transform: uppercase; padding: .5rem .75rem; border-bottom: 1px solid var(--border); font-family: 'IBM Plex Sans', sans-serif; }
+    .inputs-table td { padding: .7rem .75rem; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+    .inputs-table tr:last-child td { border-bottom: none; }
+    .inputs-table code { font-family: 'IBM Plex Mono', monospace; font-size: .82rem; background: var(--bg-overlay); padding: .1rem .35rem; border-radius: 3px; color: var(--blue); }
+    .badge { font-size: .72rem; padding: .15rem .5rem; border-radius: 3px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
+    .badge-req { background: rgba(248,81,73,.13); color: var(--red); }
+    [data-theme="light"] .badge-req { background: rgba(207,34,46,.1); }
+    .badge-opt { background: var(--bg-overlay); color: var(--text-muted); }
+    .input-name { font-family: 'IBM Plex Mono', monospace; font-size: .85rem; color: var(--text); font-weight: 600; }
+
+    /* ── Features ── */
+    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 2rem; }
+    .feature { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.35rem; }
+    .feature-icon { font-size: 1.4rem; margin-bottom: .75rem; }
+    .feature h3 { font-size: 1rem; font-weight: 600; margin-bottom: .35rem; }
+    .feature p { font-size: .88rem; color: var(--text-muted); line-height: 1.55; }
+
+    /* ── Authors ── */
+    .authors { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .75rem; margin-top: 2rem; }
+    .author {
+      display: flex; align-items: center; gap: .75rem;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .85rem 1rem;
+      text-decoration: none;
+      color: var(--text);
+      transition: border-color .15s, background .15s;
+    }
+    .author:hover { border-color: var(--accent); background: var(--bg-overlay); }
+    .author-avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--bg-overlay);
+      border: 1px solid var(--border);
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .author-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .author-info { min-width: 0; }
+    .author-name { font-weight: 600; font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .author-handle { font-family: 'IBM Plex Mono', monospace; font-size: .75rem; color: var(--text-muted); }
+
+    /* ── Footer ── */
+    footer { border-top: 1px solid var(--border-subtle); padding: 2rem 0; margin-top: 2rem; }
+    footer .wrap { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    .footer-text { font-size: .85rem; color: var(--text-dim); }
+    .footer-links { display: flex; gap: 1.25rem; }
+    .footer-links a { font-size: .85rem; color: var(--text-dim); text-decoration: none; }
+    .footer-links a:hover { color: var(--text-muted); }
+
+    @media (max-width: 600px) {
+      h1 { font-size: 1.8rem; }
+      .nav-links { display: none; }
+      .steps { border-radius: 8px; }
+      .authors { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="wrap">
+    <a class="nav-brand" href="#"><span>SCAIA</span></a>
+    <div class="nav-links">
+      <a href="#como-funciona">Como funciona</a>
+      <a href="#uso">Uso</a>
+      <a href="#inputs">Inputs</a>
+      <a href="#autores">Autores</a>
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Alternar tema">
+        <span class="theme-toggle-icon icon-moon">🌙</span>
+        <span class="theme-toggle-icon icon-sun">☀️</span>
+      </button>
+    </div>
+    <a class="btn-primary" href="https://github.com/teodororo/SCAIA" target="_blank" rel="noopener">Ver no GitHub →</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-badge">GitHub Action · Marketplace</div>
+    <h1>Revisão de código<br /><em>por IA em cada PR</em></h1>
+    <p class="hero-sub">Uma GitHub Action reutilizável que lê os diffs do seu pull request e posta comentários inline com os achados. Traga seu próprio token — funciona com qualquer endpoint OpenAI-compatível.</p>
+    <div class="hero-actions">
+      <a class="btn-primary btn-lg" href="#uso">Começar agora</a>
+      <a class="btn-ghost btn-lg" href="https://github.com/teodororo/SCAIA" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- DEMO -->
+<section class="demo-wrap">
+  <div class="wrap">
+    <div class="demo-file-header">
+      <div class="demo-file-dot" style="background:#f85149"></div>
+      <div class="demo-file-dot" style="background:#d29922"></div>
+      <div class="demo-file-dot" style="background:#3fb950"></div>
+      <span style="margin-left:.5rem">src/auth/token.ts</span>
+      <span style="margin-left:auto;color:var(--text-dim)">diff</span>
+    </div>
+    <div class="demo-body">
+      <div class="diff-line"><span class="ln">12</span><span class="code-content" style="color:var(--text-muted)">export function createToken(userId: string) {</span></div>
+      <div class="diff-line remove"><span class="ln">13</span><span class="code-content">  const secret = process.env.JWT_SECRET;</span></div>
+      <div class="diff-line add"><span class="ln">13</span><span class="code-content">  const secret = process.env.JWT_SECRET ?? 'dev-fallback';</span></div>
+      <div class="diff-line finding"><span class="ln">14</span><span class="code-content">  return jwt.sign({ id: userId }, secret, { expiresIn: '30d' });</span></div>
+      <div class="ai-comment">
+        <div class="ai-comment-header">
+          <div class="ai-avatar">AI</div>
+          <span class="ai-label">SCAIA</span>
+          <span class="severity-badge sev-error">erro</span>
+        </div>
+        <p>O fallback <code style="font-size:.78rem;font-family:'IBM Plex Mono',monospace">'dev-fallback'</code> como secret de JWT pode vazar para produção. Remova o operador <code style="font-size:.78rem;font-family:'IBM Plex Mono',monospace">??</code> e lance um erro explícito quando a variável não estiver definida.</p>
+      </div>
+      <div class="diff-line"><span class="ln">15</span><span class="code-content" style="color:var(--text-muted)">}</span></div>
+      <div class="diff-line add finding"><span class="ln">18</span><span class="code-content">  const token = req.headers['authorization'];</span></div>
+      <div class="ai-comment">
+        <div class="ai-comment-header">
+          <div class="ai-avatar">AI</div>
+          <span class="ai-label">SCAIA</span>
+          <span class="severity-badge sev-warn">aviso</span>
+        </div>
+        <p>Prefira <code style="font-size:.78rem;font-family:'IBM Plex Mono',monospace">req.headers.authorization</code> (lowercase garantido pelo Node.js). Considere também validar o prefixo <code style="font-size:.78rem;font-family:'IBM Plex Mono',monospace">Bearer </code> antes de extrair o token.</p>
+      </div>
+      <div class="diff-line"><span class="ln">19</span><span class="code-content" style="color:var(--text-muted)">  // ...</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- COMO FUNCIONA -->
+<section class="section" id="como-funciona">
+  <div class="wrap">
+    <p class="section-label">Fluxo</p>
+    <h2>Como <span class="dim">funciona</span></h2>
+    <div class="steps">
+      <div class="step">
+        <span class="step-num">01</span>
+        <div>
+          <h3>Leitura do diff</h3>
+          <p>No evento <code style="font-family:'IBM Plex Mono',monospace;font-size:.84rem;color:var(--blue)">pull_request</code>, a action lista os arquivos alterados e extrai seus diffs, respeitando o limite configurado em <code style="font-family:'IBM Plex Mono',monospace;font-size:.84rem;color:var(--blue)">max-files</code>.</p>
+        </div>
+      </div>
+      <div class="step">
+        <span class="step-num">02</span>
+        <div>
+          <h3>Anotação de linhas</h3>
+          <p>Cada diff é anotado com os números de linha do lado novo (hunks do git) antes de ser enviado ao modelo, permitindo comentários inline precisos.</p>
+        </div>
+      </div>
+      <div class="step">
+        <span class="step-num">03</span>
+        <div>
+          <h3>Chamada ao modelo</h3>
+          <p>O diff anotado é enviado ao endpoint configurado — OpenAI, OpenRouter, Claude via proxy, ou qualquer modelo compatível com a API Chat Completions.</p>
+        </div>
+      </div>
+      <div class="step">
+        <span class="step-num">04</span>
+        <div>
+          <h3>Achados como comentários</h3>
+          <p>O modelo retorna JSON estruturado (caminho, linha, severidade, comentário). Cada achado vira um comentário inline no PR; os fora do alcance do diff são incorporados ao resumo.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- USO -->
+<section class="section" id="uso">
+  <div class="wrap">
+    <p class="section-label">Integração</p>
+    <h2>Adicione em <span class="dim">minutos</span></h2>
+
+    <div class="tabs" style="margin-top:2rem">
+      <button class="tab active" onclick="showTab('openai', event)">OpenAI</button>
+      <button class="tab" onclick="showTab('openrouter', event)">OpenRouter</button>
+      <button class="tab" onclick="showTab('proxy', event)">Claude / Proxy</button>
+    </div>
+
+    <div id="tab-openai" class="tab-content active">
+      <div class="code-block">
+        <div class="code-block-header">
+          <span class="code-block-title">.github/workflows/ai-review.yml</span>
+          <button class="copy-btn" onclick="copyCode('code-openai', event)">copiar</button>
+        </div>
+        <pre id="code-openai"><span class="key">name</span><span class="op">:</span> <span class="str">Revisão de Código por IA</span>
+<span class="key">on</span><span class="op">:</span>
+  <span class="key">pull_request</span><span class="op">:</span>
+<span class="key">permissions</span><span class="op">:</span>
+  <span class="key">contents</span><span class="op">:</span> <span class="str">read</span>
+  <span class="key">pull-requests</span><span class="op">:</span> <span class="str">write</span>
+<span class="key">jobs</span><span class="op">:</span>
+  <span class="key">review</span><span class="op">:</span>
+    <span class="key">runs-on</span><span class="op">:</span> <span class="str">ubuntu-latest</span>
+    <span class="key">steps</span><span class="op">:</span>
+      <span class="op">-</span> <span class="key">uses</span><span class="op">:</span> <span class="str">teodororo/SCAIA@v1</span>
+        <span class="key">with</span><span class="op">:</span>
+          <span class="key">api-token</span><span class="op">:</span> <span class="str">${{ secrets.AI_API_TOKEN }}</span>
+          <span class="key">model</span><span class="op">:</span> <span class="str">gpt-4o</span></pre>
+      </div>
+    </div>
+
+    <div id="tab-openrouter" class="tab-content">
+      <div class="code-block">
+        <div class="code-block-header">
+          <span class="code-block-title">.github/workflows/ai-review.yml</span>
+          <button class="copy-btn" onclick="copyCode('code-openrouter', event)">copiar</button>
+        </div>
+        <pre id="code-openrouter"><span class="op">-</span> <span class="key">uses</span><span class="op">:</span> <span class="str">teodororo/SCAIA@v1</span>
+  <span class="key">with</span><span class="op">:</span>
+    <span class="key">api-token</span><span class="op">:</span> <span class="str">${{ secrets.OPENROUTER_KEY }}</span>
+    <span class="key">api-base-url</span><span class="op">:</span> <span class="str">https://openrouter.ai/api/v1</span>
+    <span class="key">model</span><span class="op">:</span> <span class="str">anthropic/claude-3.5-sonnet</span></pre>
+      </div>
+    </div>
+
+    <div id="tab-proxy" class="tab-content">
+      <div class="code-block">
+        <div class="code-block-header">
+          <span class="code-block-title">.github/workflows/ai-review.yml</span>
+          <button class="copy-btn" onclick="copyCode('code-proxy', event)">copiar</button>
+        </div>
+        <pre id="code-proxy"><span class="op">-</span> <span class="key">uses</span><span class="op">:</span> <span class="str">teodororo/SCAIA@v1</span>
+  <span class="key">with</span><span class="op">:</span>
+    <span class="key">api-token</span><span class="op">:</span> <span class="str">${{ secrets.MY_AI_KEY }}</span>
+    <span class="key">api-base-url</span><span class="op">:</span> <span class="str">https://meu-proxy.exemplo.com/v1</span>
+    <span class="key">model</span><span class="op">:</span> <span class="str">meu-modelo-local</span>
+    <span class="cm">    # Qualquer endpoint OpenAI-compatível funciona</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INPUTS -->
+<section class="section" id="inputs">
+  <div class="wrap">
+    <p class="section-label">Referência</p>
+    <h2>Inputs <span class="dim">e outputs</span></h2>
+    <table class="inputs-table">
+      <thead>
+        <tr>
+          <th>Input</th>
+          <th></th>
+          <th>Padrão</th>
+          <th>Descrição</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="input-name">api-token</span></td>
+          <td><span class="badge badge-req">obrigatório</span></td>
+          <td>—</td>
+          <td>Chave de API para o provedor de IA escolhido.</td>
+        </tr>
+        <tr>
+          <td><span class="input-name">model</span></td>
+          <td><span class="badge badge-req">obrigatório</span></td>
+          <td>—</td>
+          <td>ID do modelo a usar (ex: <code>gpt-4o</code>).</td>
+        </tr>
+        <tr>
+          <td><span class="input-name">api-base-url</span></td>
+          <td><span class="badge badge-opt">opcional</span></td>
+          <td><code>openai.com/v1</code></td>
+          <td>URL base do endpoint Chat Completions.</td>
+        </tr>
+        <tr>
+          <td><span class="input-name">github-token</span></td>
+          <td><span class="badge badge-opt">opcional</span></td>
+          <td><code>github.token</code></td>
+          <td>Token para ler o PR e postar comentários.</td>
+        </tr>
+        <tr>
+          <td><span class="input-name">system-prompt</span></td>
+          <td><span class="badge badge-opt">opcional</span></td>
+          <td>embutido</td>
+          <td>Override do prompt de sistema do revisor.</td>
+        </tr>
+        <tr>
+          <td><span class="input-name">max-files</span></td>
+          <td><span class="badge badge-opt">opcional</span></td>
+          <td><code>50</code></td>
+          <td>Limite de arquivos alterados enviados à IA.</td>
+        </tr>
+        <tr>
+          <td><span class="input-name">exclude</span></td>
+          <td><span class="badge badge-opt">opcional</span></td>
+          <td>—</td>
+          <td>Globs separados por vírgula para ignorar arquivos.</td>
+        </tr>
+        <tr>
+          <td><span class="input-name">fail-on-findings</span></td>
+          <td><span class="badge badge-opt">opcional</span></td>
+          <td><code>false</code></td>
+          <td>Falha o job quando qualquer achado é reportado.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="margin-top:1.5rem;font-size:.9rem;color:var(--text-muted)"><strong style="color:var(--text)">Output:</strong> <code style="font-family:'IBM Plex Mono',monospace;font-size:.84rem;color:var(--blue)">findings-count</code> — número de achados produzidos pela IA.</p>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="section">
+  <div class="wrap">
+    <p class="section-label">Destaques</p>
+    <h2>Traga <span class="dim">seu próprio modelo</span></h2>
+    <div class="features">
+      <div class="feature">
+        <div class="feature-icon">🔑</div>
+        <h3>Seu token, seu custo</h3>
+        <p>Nenhum segredo passa por servidores de terceiros. A chave de API vai direto do seu repositório para o provedor.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🔌</div>
+        <h3>Qualquer provider</h3>
+        <p>OpenAI, OpenRouter, Anthropic via proxy, Mistral, Groq ou modelo self-hosted — qualquer endpoint <code style="font-family:'IBM Plex Mono',monospace;font-size:.82rem">/v1/chat/completions</code>.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">💬</div>
+        <h3>Comentários inline</h3>
+        <p>Os achados vão para as linhas exatas do diff. O que fica fora do alcance é incluído no resumo da revisão.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- AUTORES -->
+<section class="section" id="autores">
+  <div class="wrap">
+    <p class="section-label">Equipe</p>
+    <h2>Desenvolvido <span class="dim">por</span></h2>
+    <div class="authors">
+      <a class="author" href="https://github.com/alefpereira" target="_blank" rel="noopener">
+        <div class="author-avatar">
+          <img src="https://github.com/alefpereira.png" alt="alefpereira" loading="lazy" onerror="this.style.display='none'" />
+        </div>
+        <div class="author-info">
+          <div class="author-name">Alef Pereira</div>
+          <div class="author-handle">@alefpereira</div>
+        </div>
+      </a>
+      <a class="author" href="https://github.com/MKS-ICOMP" target="_blank" rel="noopener">
+        <div class="author-avatar">
+          <img src="https://github.com/MKS-ICOMP.png" alt="MKS-ICOMP" loading="lazy" onerror="this.style.display='none'" />
+        </div>
+        <div class="author-info">
+          <div class="author-name">Marckson Monteiro</div>
+          <div class="author-handle">@MKS-ICOMP</div>
+        </div>
+      </a>
+      <a class="author" href="https://github.com/renvieir" target="_blank" rel="noopener">
+        <div class="author-avatar">
+          <img src="https://github.com/renvieir.png" alt="renvieir" loading="lazy" onerror="this.style.display='none'" />
+        </div>
+        <div class="author-info">
+          <div class="author-name">Renato Pacheco</div>
+          <div class="author-handle">@renvieir</div>
+        </div>
+      </a>
+      <a class="author" href="https://github.com/teodororo" target="_blank" rel="noopener">
+        <div class="author-avatar">
+          <img src="https://github.com/teodororo.png" alt="teodororo" loading="lazy" onerror="this.style.display='none'" />
+        </div>
+        <div class="author-info">
+          <div class="author-name">Giovanna Souza</div>
+          <div class="author-handle">@teodororo</div>
+        </div>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="wrap">
+    <span class="footer-text">SCAIA · Software Composition AI Analysis</span>
+    <div class="footer-links">
+      <a href="https://github.com/teodororo/SCAIA" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/teodororo/SCAIA/issues" target="_blank" rel="noopener">Issues</a>
+      <a href="https://github.com/teodororo/SCAIA/blob/main/README.md" target="_blank" rel="noopener">README</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  function toggleTheme() {
+    const html = document.documentElement;
+    const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', next);
+    try { localStorage.setItem('scaia-theme', next); } catch(e) {}
+  }
+
+  (function() {
+    try {
+      const saved = localStorage.getItem('scaia-theme');
+      if (saved) document.documentElement.setAttribute('data-theme', saved);
+    } catch(e) {}
+  })();
+
+  function showTab(id, e) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+    document.getElementById('tab-' + id).classList.add('active');
+    if (e && e.target) e.target.classList.add('active');
+  }
+
+  function copyCode(id, e) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    navigator.clipboard.writeText(el.innerText).then(() => {
+      const btn = e && e.target ? e.target : null;
+      if (!btn) return;
+      btn.textContent = 'copiado ✓';
+      setTimeout(() => btn.textContent = 'copiar', 1800);
+    });
+  }
+</script>
+</body>
+</html>
