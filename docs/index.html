@@ -139,15 +139,15 @@
     .hero { padding: 5rem 0 3.5rem; text-align: center; }
     .hero-badge {
       display: inline-flex; align-items: center; gap: .5rem;
-      border: 1px solid var(--accent-dim);
-      background: rgba(124,58,237,.08);
+      border: 1px solid var(--accent-glow);
+      background: rgba(124,58,237,.22);
       color: var(--accent-glow);
-      font-size: .8rem; font-family: 'IBM Plex Mono', monospace;
+      font-size: .9rem; font-family: 'IBM Plex Mono', monospace;
       border-radius: 4px; padding: .3rem .9rem;
       margin-bottom: 1.75rem;
       letter-spacing: .04em;
     }
-    [data-theme="light"] .hero-badge { background: var(--accent-dim); }
+    [data-theme="light"] .hero-badge { background: var(--accent-dim); border-color: var(--accent); }
     .hero-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-glow); flex-shrink: 0; }
     h1 {
       font-family: 'IBM Plex Sans', sans-serif;
@@ -233,7 +233,7 @@
 
     /* ── Sections ── */
     .section { padding: 3.5rem 0; border-top: 1px solid var(--border-subtle); }
-    .section-label { font-family: 'IBM Plex Mono', monospace; font-size: .75rem; color: var(--accent-glow); letter-spacing: .1em; text-transform: uppercase; margin-bottom: .75rem; }
+    .section-label { font-family: 'IBM Plex Mono', monospace; font-size: .9rem; color: var(--accent-glow); letter-spacing: .1em; text-transform: uppercase; margin-bottom: .75rem; font-weight: 600;}
     h2 { font-size: 1.7rem; font-weight: 600; line-height: 1.2; margin-bottom: .75rem; letter-spacing: -.02em; }
     h2 .dim { color: var(--text-muted); }
 
@@ -351,7 +351,7 @@
   <div class="wrap">
     <div class="hero-badge">GitHub Action · Marketplace</div>
     <h1>Revisão de código<br /><em>por IA em cada PR</em></h1>
-    <p class="hero-sub">Uma GitHub Action reutilizável que lê os diffs do seu pull request e posta comentários inline com os achados. Traga sua própria API KEY. Funciona com qualquer endpoint OpenAI-compatível.</p>
+    <p class="hero-sub">Uma GitHub Action reutilizável que lê os diffs do seu pull request e posta comentários inline com os achados. Traga seu próprio token — funciona com qualquer endpoint OpenAI-compatível.</p>
     <div class="hero-actions">
       <a class="btn-primary btn-lg" href="#uso">Começar agora</a>
       <a class="btn-ghost btn-lg" href="https://github.com/teodororo/SCAIA" target="_blank" rel="noopener">
