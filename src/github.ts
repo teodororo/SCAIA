@@ -137,8 +137,12 @@ function severityLabel(sev: Finding["severity"]): string {
 }
 
 /** Matcher de glob bem pequeno, com suporte a segmentos "*" e "**". */
-function isExcluded(path: string, patterns: string[]): boolean {
+export function matchesAnyGlob(path: string, patterns: string[]): boolean {
   return patterns.some((pattern) => globMatch(pattern, path));
+}
+
+function isExcluded(path: string, patterns: string[]): boolean {
+  return matchesAnyGlob(path, patterns);
 }
 
 function globMatch(pattern: string, path: string): boolean {

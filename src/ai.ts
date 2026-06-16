@@ -1,4 +1,4 @@
-import { DEFAULT_SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
+import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 
 export interface Finding {
   path: string;
@@ -31,7 +31,7 @@ export class AiClient {
     this.endpoint = `${base}/chat/completions`;
   }
 
-  async review(diffText: string): Promise<ReviewResult> {
+  async review(userContent: string): Promise<ReviewResult> {
     const body = {
       model: this.opts.model,
       temperature: 0,
@@ -40,7 +40,7 @@ export class AiClient {
           role: "system",
           content: this.opts.systemPrompt || DEFAULT_SYSTEM_PROMPT,
         },
-        { role: "user", content: buildUserPrompt(diffText) },
+        { role: "user", content: userContent },
       ],
       response_format: { type: "json_object" },
     };
