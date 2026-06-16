@@ -1,0 +1,46 @@
+name: "SCAIA - Revisão de Código por IA"
+description: "Roda uma revisão de código por IA nos diffs do pull request usando qualquer endpoint compatível com a OpenAI, postando comentários inline."
+author: "scaia"
+branding:
+  icon: "git-pull-request"
+  color: "purple"
+
+inputs:
+  api-token:
+    description: "Token de API do provedor de IA (a chave do próprio chamador)."
+    required: true
+  api-base-url:
+    description: "URL base de um endpoint Chat Completions compatível com a OpenAI."
+    required: false
+    default: "https://api.openai.com/v1"
+  model:
+    description: "Id do modelo a usar na revisão (ex.: gpt-4o, claude-3-5-sonnet via proxy)."
+    required: true
+  github-token:
+    description: "Token usado para ler o PR e postar comentários da revisão. Padrão: token do workflow."
+    required: false
+    default: ${{ github.token }}
+  system-prompt:
+    description: "Override opcional do prompt de sistema do revisor."
+    required: false
+    default: ""
+  max-files:
+    description: "Número máximo de arquivos alterados a enviar para a IA."
+    required: false
+    default: "50"
+  exclude:
+    description: "Padrões glob (separados por vírgula ou quebra de linha) de arquivos a ignorar."
+    required: false
+    default: ""
+  fail-on-findings:
+    description: "Se 'true', a action sai com status diferente de zero quando há achados."
+    required: false
+    default: "false"
+
+outputs:
+  findings-count:
+    description: "Número de achados produzidos pela revisão da IA."
+
+runs:
+  using: "node20"
+  main: "dist/index.js"
