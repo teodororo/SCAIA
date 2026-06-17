@@ -29970,7 +29970,6 @@ class AiClient {
     async review(userContent) {
         const body = {
             model: this.opts.model,
-            temperature: 0,
             messages: [
                 {
                     role: "system",
@@ -29980,6 +29979,9 @@ class AiClient {
             ],
             response_format: { type: "json_object" },
         };
+        if (this.opts.temperature !== undefined) {
+            body.temperature = this.opts.temperature;
+        }
         const data = (await this.fetchWithRetry(body));
         const content = data.choices?.[0]?.message?.content;
         if (!content) {
@@ -30481,6 +30483,7 @@ async function run() {
     const exclude = parsePatterns(core.getInput("exclude"));
     const failOnFindings = core.getInput("fail-on-findings") === "true";
     const maxRetries = Number.parseInt(core.getInput("max-retries") || "5", 10);
+    const temperature = parseTemperature(core.getInput("temperature"));
     if (mode !== "pr" && mode !== "full") {
         core.setFailed(`Modo inválido: "${mode}". Use "pr" ou "full".`);
         return;
@@ -30495,6 +30498,7 @@ async function run() {
             exclude,
             failOnFindings,
             maxRetries,
+            temperature,
         });
         return;
     }
@@ -30508,7 +30512,22 @@ async function run() {
         exclude,
         failOnFindings,
         maxRetries,
+        temperature,
     });
+}
+/**
+ * Faz o parse do input `temperature`. Vazio retorna undefined (campo não enviado,
+ * usa o default do modelo). Um número fora da faixa 0-2 é rejeitado.
+ */
+function parseTemperature(raw) {
+    const trimmed = raw.trim();
+    if (trimmed === "")
+        return undefined;
+    const value = Number(trimmed);
+    if (!Number.isFinite(value) || value < 0 || value > 2) {
+        throw new Error(`Temperatura inválida: "${raw}". Use um número entre 0 e 2, ou deixe vazio.`);
+    }
+    return value;
 }
 /** Loga uma re-tentativa da chamada à IA no log da action. */
 function logRetry(attempt, status, waitMs) {
@@ -30547,6 +30566,7 @@ async function runPrReview(opts) {
         token: opts.apiToken,
         model: opts.model,
         systemPrompt: opts.systemPromptOverride || prompt_1.DEFAULT_SYSTEM_PROMPT,
+        temperature: opts.temperature,
         maxRetries: opts.maxRetries,
         onRetry: logRetry,
     });
@@ -30596,6 +30616,7 @@ async function runFullScan(opts) {
         token: opts.apiToken,
         model: opts.model,
         systemPrompt: opts.systemPromptOverride || prompt_1.DEFAULT_FULL_SYSTEM_PROMPT,
+        temperature: opts.temperature,
         maxRetries: opts.maxRetries,
         onRetry: logRetry,
     });

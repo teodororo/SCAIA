@@ -36,6 +36,7 @@ async function run(): Promise<void> {
   const exclude = parsePatterns(core.getInput("exclude"));
   const failOnFindings = core.getInput("fail-on-findings") === "true";
   const maxRetries = Number.parseInt(core.getInput("max-retries") || "5", 10);
+  const temperature = parseTemperature(core.getInput("temperature"));
 
   if (mode !== "pr" && mode !== "full") {
     core.setFailed(`Modo inválido: "${mode}". Use "pr" ou "full".`);
@@ -52,6 +53,7 @@ async function run(): Promise<void> {
       exclude,
       failOnFindings,
       maxRetries,
+      temperature,
     });
     return;
   }
@@ -66,7 +68,22 @@ async function run(): Promise<void> {
     exclude,
     failOnFindings,
     maxRetries,
+    temperature,
   });
+}
+
+/**
+ * Faz o parse do input `temperature`. Vazio retorna undefined (campo não enviado,
+ * usa o default do modelo). Um número fora da faixa 0-2 é rejeitado.
+ */
+function parseTemperature(raw: string): number | undefined {
+  const trimmed = raw.trim();
+  if (trimmed === "") return undefined;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 0 || value > 2) {
+    throw new Error(`Temperatura inválida: "${raw}". Use um número entre 0 e 2, ou deixe vazio.`);
+  }
+  return value;
 }
 
 interface CommonOpts {
@@ -78,6 +95,8 @@ interface CommonOpts {
   exclude: string[];
   failOnFindings: boolean;
   maxRetries: number;
+  /** Temperatura de amostragem; undefined = usa o default do modelo. */
+  temperature?: number;
 }
 
 /** Loga uma re-tentativa da chamada à IA no log da action. */
@@ -130,6 +149,7 @@ async function runPrReview(
     token: opts.apiToken,
     model: opts.model,
     systemPrompt: opts.systemPromptOverride || DEFAULT_SYSTEM_PROMPT,
+    temperature: opts.temperature,
     maxRetries: opts.maxRetries,
     onRetry: logRetry,
   });
@@ -195,6 +215,7 @@ async function runFullScan(opts: CommonOpts): Promise<void> {
     token: opts.apiToken,
     model: opts.model,
     systemPrompt: opts.systemPromptOverride || DEFAULT_FULL_SYSTEM_PROMPT,
+    temperature: opts.temperature,
     maxRetries: opts.maxRetries,
     onRetry: logRetry,
   });
