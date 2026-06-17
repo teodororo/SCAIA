@@ -38,6 +38,11 @@ export interface AiClientOptions {
   token: string;
   model: string;
   systemPrompt?: string;
+  /**
+   * Temperatura de amostragem. Quando ausente, o campo não é enviado e o modelo
+   * usa seu default — necessário para modelos que só aceitam o default (ex.: gpt-5.x).
+   */
+  temperature?: number;
   /** Máximo de re-tentativas em respostas 429/5xx. Padrão: 5. */
   maxRetries?: number;
   /** Chamado antes de cada nova tentativa, para fins de log. */
@@ -81,9 +86,8 @@ export class AiClient {
   }
 
   async review(userContent: string): Promise<ReviewResult> {
-    const body = {
+    const body: Record<string, unknown> = {
       model: this.opts.model,
-      temperature: 0,
       messages: [
         {
           role: "system",
@@ -93,6 +97,9 @@ export class AiClient {
       ],
       response_format: { type: "json_object" },
     };
+    if (this.opts.temperature !== undefined) {
+      body.temperature = this.opts.temperature;
+    }
 
     const data = (await this.fetchWithRetry(body)) as {
       choices?: { message?: { content?: string } }[];

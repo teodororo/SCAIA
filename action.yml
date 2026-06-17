@@ -28,6 +28,10 @@ inputs:
     description: "Override opcional do prompt de sistema do revisor."
     required: false
     default: ""
+  temperature:
+    description: "Temperatura de amostragem (0-2). Vazio = usa o default do modelo. Deixe vazio para modelos que só aceitam o default (ex.: série gpt-5)."
+    required: false
+    default: ""
   max-files:
     description: "Número máximo de arquivos a enviar para a IA."
     required: false

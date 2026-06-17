@@ -1,0 +1,68 @@
+# Release totalmente automatizado.
+#
+# A cada push na main, o semantic-release lê os Conventional Commits desde a
+# última release e decide a próxima versão:
+#   fix:               -> patch (v1.0.0 -> v1.0.1)
+#   feat:              -> minor (v1.0.0 -> v1.1.0)
+#   BREAKING CHANGE:   -> major (v1.0.0 -> v2.0.0)
+# Quando há algo a publicar, ele rebuilda e commita o dist/, atualiza o
+# CHANGELOG e a versão do package.json, cria a tag vX.Y.Z e a GitHub Release.
+# Em seguida, a tag móvel do major (ex.: v1) é movida para o mesmo ponto,
+# que é como os consumidores referenciam a action (`teodororo/SCAIA@v1`).
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Evita releases concorrentes pisando uns nos outros.
+concurrency: release
+
+permissions:
+  contents: write # criar tags, commitar dist/CHANGELOG e publicar a release
+  issues: write # comentar nas issues/PRs incluídos na release
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # semantic-release precisa do histórico completo
+          persist-credentials: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build bundle
+        run: npm run build
+
+      - name: Semantic Release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Mover tag do major para esta release
+        if: steps.semantic.outputs.new_release_published == 'true'
+        env:
+          MAJOR: v${{ steps.semantic.outputs.new_release_major_version }}
+          VERSION: v${{ steps.semantic.outputs.new_release_version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f "$MAJOR" "$VERSION"
+          git push origin "refs/tags/$MAJOR" --force
+          echo "Tag $MAJOR agora aponta para $VERSION"
