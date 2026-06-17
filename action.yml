@@ -56,6 +56,10 @@ inputs:
     description: "Se 'true', a action sai com status diferente de zero quando há achados."
     required: false
     default: "false"
+  max-retries:
+    description: "Número máximo de re-tentativas em respostas 429 (rate limit) ou 5xx da IA."
+    required: false
+    default: "5"
 
 outputs:
   findings-count:

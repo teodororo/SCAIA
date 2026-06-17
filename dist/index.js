@@ -29931,6 +29931,30 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.AiClient = void 0;
 exports.parseReview = parseReview;
 const prompt_1 = __nccwpck_require__(705);
+/** Pausa a execução por `ms` milissegundos. */
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+/**
+ * Extrai, em milissegundos, quanto esperar antes de re-tentar uma resposta 429.
+ * Considera o header `Retry-After` (segundos) e a dica "try again in Xs" que a
+ * OpenAI inclui no corpo do erro. Retorna undefined quando não há sinal.
+ */
+function retryAfterMs(res, body) {
+    const header = res.headers.get("retry-after");
+    if (header) {
+        const secs = Number(header);
+        if (Number.isFinite(secs))
+            return secs * 1000;
+    }
+    const m = /try again in ([\d.]+)\s*(ms|s)/i.exec(body);
+    if (m) {
+        const value = Number(m[1]);
+        if (Number.isFinite(value))
+            return m[2].toLowerCase() === "ms" ? value : value * 1000;
+    }
+    return undefined;
+}
 /**
  * Cliente mínimo para qualquer endpoint /chat/completions compatível com a OpenAI.
  * Usa o fetch global disponível no Node 20.
@@ -29956,24 +29980,46 @@ class AiClient {
             ],
             response_format: { type: "json_object" },
         };
-        const res = await fetch(this.endpoint, {
-            method: "POST",
-            headers: {
-                "content-type": "application/json",
-                authorization: `Bearer ${this.opts.token}`,
-            },
-            body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-            const text = await res.text().catch(() => "");
-            throw new Error(`Requisição à IA falhou: ${res.status} ${res.statusText} ${text.slice(0, 500)}`);
-        }
-        const data = (await res.json());
+        const data = (await this.fetchWithRetry(body));
         const content = data.choices?.[0]?.message?.content;
         if (!content) {
             throw new Error("A resposta da IA não continha nenhum conteúdo.");
         }
         return parseReview(content);
+    }
+    /**
+     * Faz o POST para o endpoint de chat, re-tentando em 429 (rate limit) e 5xx
+     * com backoff exponencial. Em 429, respeita o tempo de espera sugerido pela
+     * API (header `Retry-After` ou a dica no corpo). Retorna o JSON da resposta.
+     */
+    async fetchWithRetry(body) {
+        const maxRetries = this.opts.maxRetries ?? 5;
+        let lastError = "";
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            const res = await fetch(this.endpoint, {
+                method: "POST",
+                headers: {
+                    "content-type": "application/json",
+                    authorization: `Bearer ${this.opts.token}`,
+                },
+                body: JSON.stringify(body),
+            });
+            if (res.ok)
+                return res.json();
+            const text = await res.text().catch(() => "");
+            lastError = `${res.status} ${res.statusText} ${text.slice(0, 500)}`;
+            const retriable = res.status === 429 || res.status >= 500;
+            if (!retriable || attempt === maxRetries)
+                break;
+            // Espera o tempo sugerido pela API, ou backoff exponencial (1s, 2s, 4s...)
+            // com 1s de folga em cima do hint para evitar reincidir na janela.
+            const hinted = retryAfterMs(res, text);
+            const backoff = 2 ** attempt * 1000;
+            const waitMs = (hinted ?? backoff) + (hinted ? 1000 : 0);
+            this.opts.onRetry?.(attempt + 1, res.status, waitMs);
+            await sleep(waitMs);
+        }
+        throw new Error(`Requisição à IA falhou: ${lastError}`);
     }
 }
 exports.AiClient = AiClient;
@@ -30434,6 +30480,7 @@ async function run() {
     const maxFiles = Number.parseInt(core.getInput("max-files") || "50", 10);
     const exclude = parsePatterns(core.getInput("exclude"));
     const failOnFindings = core.getInput("fail-on-findings") === "true";
+    const maxRetries = Number.parseInt(core.getInput("max-retries") || "5", 10);
     if (mode !== "pr" && mode !== "full") {
         core.setFailed(`Modo inválido: "${mode}". Use "pr" ou "full".`);
         return;
@@ -30447,6 +30494,7 @@ async function run() {
             maxFiles,
             exclude,
             failOnFindings,
+            maxRetries,
         });
         return;
     }
@@ -30459,7 +30507,12 @@ async function run() {
         maxFiles,
         exclude,
         failOnFindings,
+        maxRetries,
     });
+}
+/** Loga uma re-tentativa da chamada à IA no log da action. */
+function logRetry(attempt, status, waitMs) {
+    core.warning(`IA respondeu ${status}; re-tentando (tentativa ${attempt}) em ${Math.round(waitMs / 1000)}s...`);
 }
 async function runPrReview(opts) {
     const ctx = (0, github_1.getPrContext)();
@@ -30494,6 +30547,8 @@ async function runPrReview(opts) {
         token: opts.apiToken,
         model: opts.model,
         systemPrompt: opts.systemPromptOverride || prompt_1.DEFAULT_SYSTEM_PROMPT,
+        maxRetries: opts.maxRetries,
+        onRetry: logRetry,
     });
     const result = await client.review((0, prompt_1.buildUserPrompt)((0, diff_1.renderDiff)(annotated)));
     core.info(`A IA retornou ${result.findings.length} achado(s).`);
@@ -30541,6 +30596,8 @@ async function runFullScan(opts) {
         token: opts.apiToken,
         model: opts.model,
         systemPrompt: opts.systemPromptOverride || prompt_1.DEFAULT_FULL_SYSTEM_PROMPT,
+        maxRetries: opts.maxRetries,
+        onRetry: logRetry,
     });
     const merged = { summary: "", findings: [] };
     const summaries = [];

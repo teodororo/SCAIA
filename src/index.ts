@@ -35,6 +35,7 @@ async function run(): Promise<void> {
   const maxFiles = Number.parseInt(core.getInput("max-files") || "50", 10);
   const exclude = parsePatterns(core.getInput("exclude"));
   const failOnFindings = core.getInput("fail-on-findings") === "true";
+  const maxRetries = Number.parseInt(core.getInput("max-retries") || "5", 10);
 
   if (mode !== "pr" && mode !== "full") {
     core.setFailed(`Modo inválido: "${mode}". Use "pr" ou "full".`);
@@ -50,6 +51,7 @@ async function run(): Promise<void> {
       maxFiles,
       exclude,
       failOnFindings,
+      maxRetries,
     });
     return;
   }
@@ -63,6 +65,7 @@ async function run(): Promise<void> {
     maxFiles,
     exclude,
     failOnFindings,
+    maxRetries,
   });
 }
 
@@ -74,6 +77,16 @@ interface CommonOpts {
   maxFiles: number;
   exclude: string[];
   failOnFindings: boolean;
+  maxRetries: number;
+}
+
+/** Loga uma re-tentativa da chamada à IA no log da action. */
+function logRetry(attempt: number, status: number, waitMs: number): void {
+  core.warning(
+    `IA respondeu ${status}; re-tentando (tentativa ${attempt}) em ${Math.round(
+      waitMs / 1000
+    )}s...`
+  );
 }
 
 async function runPrReview(
@@ -117,6 +130,8 @@ async function runPrReview(
     token: opts.apiToken,
     model: opts.model,
     systemPrompt: opts.systemPromptOverride || DEFAULT_SYSTEM_PROMPT,
+    maxRetries: opts.maxRetries,
+    onRetry: logRetry,
   });
   const result = await client.review(buildUserPrompt(renderDiff(annotated)));
 
@@ -180,6 +195,8 @@ async function runFullScan(opts: CommonOpts): Promise<void> {
     token: opts.apiToken,
     model: opts.model,
     systemPrompt: opts.systemPromptOverride || DEFAULT_FULL_SYSTEM_PROMPT,
+    maxRetries: opts.maxRetries,
+    onRetry: logRetry,
   });
 
   const merged: ReviewResult = { summary: "", findings: [] };
