@@ -1,0 +1,30 @@
+# Workflow de exemplo para escanear o REPOSITÓRIO INTEIRO (modo full).
+# Copie isto para um repositório que deseja receber scans periódicos por IA.
+name: Scan Completo por IA
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # toda segunda às 06:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4 # obrigatório no modo full
+      - id: scaia
+        uses: teodororo/SCAIA@v1
+        with:
+          mode: full
+          api-token: ${{ secrets.AI_API_TOKEN }}
+          model: gpt-4o
+          # include: "src/**"          # opcional; vazio = todos os arquivos versionados
+          # exclude: "**/*.lock,dist/**"
+          # report-path: scaia-report.md  # padrão
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scaia-report
+          path: ${{ steps.scaia.outputs.report-path }}

@@ -20,26 +20,52 @@ inputs:
     description: "Token usado para ler o PR e postar comentários da revisão. Padrão: token do workflow."
     required: false
     default: ${{ github.token }}
+  mode:
+    description: "'pr' para revisar apenas o diff do pull request; 'full' para escanear o repositório inteiro (exige actions/checkout)."
+    required: false
+    default: "pr"
   system-prompt:
     description: "Override opcional do prompt de sistema do revisor."
     required: false
     default: ""
   max-files:
-    description: "Número máximo de arquivos alterados a enviar para a IA."
+    description: "Número máximo de arquivos a enviar para a IA."
     required: false
-    default: "50"
+    default: "500"
+  include:
+    description: "Padrões glob (separados por vírgula ou quebra de linha) de arquivos a incluir no modo 'full'. Vazio = todos os arquivos versionados."
+    required: false
+    default: ""
   exclude:
     description: "Padrões glob (separados por vírgula ou quebra de linha) de arquivos a ignorar."
     required: false
     default: ""
+  max-file-bytes:
+    description: "No modo 'full', ignora arquivos maiores que este tamanho em bytes."
+    required: false
+    default: "100000"
+  max-chars-per-request:
+    description: "No modo 'full', orçamento de caracteres por requisição à IA (os arquivos são enviados em lotes)."
+    required: false
+    default: "100000"
+  report-path:
+    description: "No modo 'full', caminho do arquivo Markdown de relatório a ser gerado."
+    required: false
+    default: "scaia-report.md"
   fail-on-findings:
     description: "Se 'true', a action sai com status diferente de zero quando há achados."
     required: false
     default: "false"
+  max-retries:
+    description: "Número máximo de re-tentativas em respostas 429 (rate limit) ou 5xx da IA."
+    required: false
+    default: "5"
 
 outputs:
   findings-count:
     description: "Número de achados produzidos pela revisão da IA."
+  report-path:
+    description: "No modo 'full', caminho do arquivo de relatório Markdown gerado."
 
 runs:
   using: "node20"
