@@ -1,4 +1,4 @@
-# SCAIA — Action de Revisão de Código por IA
+# SCAIA (Software Composition AI Analysis) - Github Action de Revisão de Código por IA
 
 Uma GitHub Action reutilizável que roda uma revisão por IA no seu código. Quem
 usa traz **o próprio token de IA** e aponta a action para **qualquer endpoint
@@ -48,11 +48,10 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: teodororo/SCAIA@v1
+      - uses: teodororo/SCAIA@v2
         with:
-          api-token: ${{ secrets.AI_API_TOKEN }}
+          api-token: ${{secrets.AI_API_TOKEN}}
           model: gpt-4o
-          # api-base-url: https://api.openai.com/v1   # padrão
 ```
 
 ### Usando outro provedor
@@ -60,7 +59,7 @@ jobs:
 ```yaml
       - uses: teodororo/SCAIA@v1
         with:
-          api-token: ${{ secrets.OPENROUTER_KEY }}
+          api-token: ${{secrets.OPENROUTER_KEY}}
           api-base-url: https://openrouter.ai/api/v1
           model: anthropic/claude-3.5-sonnet
 ```
@@ -138,5 +137,5 @@ npm run typecheck   # checagem de tipos com o tsc
 npm run build       # empacota em dist/ com o ncc
 ```
 
-O `dist/index.js` empacotado precisa ser commitado — o GitHub Actions o executa
+O `dist/index.js` empacotado precisa ser commitado, o GitHub Actions o executa
 diretamente.
