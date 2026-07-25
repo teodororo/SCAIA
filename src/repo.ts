@@ -45,15 +45,17 @@ export function annotateRepoFile(
   if (content.includes(String.fromCharCode(0))) return null;
 
   const validLines = new Set<number>();
+  const lineText = new Map<number, string>();
   const out: string[] = [];
   const lines = content.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const lineNo = i + 1;
     validLines.add(lineNo);
+    lineText.set(lineNo, lines[i]);
     out.push(`${String(lineNo).padStart(5, " ")}: ${lines[i]}`);
   }
 
-  return { path, annotated: out.join("\n"), validLines };
+  return { path, annotated: out.join("\n"), validLines, lineText };
 }
 
 /**

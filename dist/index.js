@@ -29929,6 +29929,7 @@ function wrappy (fn, cb) {
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.AiClient = void 0;
+exports.serializeFindings = serializeFindings;
 exports.parseReview = parseReview;
 const prompt_1 = __nccwpck_require__(705);
 /** Pausa a execução por `ms` milissegundos. */
@@ -29967,13 +29968,18 @@ class AiClient {
         const base = opts.baseUrl.replace(/\/+$/, "");
         this.endpoint = `${base}/chat/completions`;
     }
-    async review(userContent) {
+    /**
+     * `systemPrompt`, quando informado, substitui o system prompt do cliente só
+     * nesta chamada — usado pela segunda opinião, que roda com outro prompt mas
+     * reaproveita o mesmo cliente (mesmo modelo, token e temperatura).
+     */
+    async review(userContent, systemPrompt) {
         const body = {
             model: this.opts.model,
             messages: [
                 {
                     role: "system",
-                    content: this.opts.systemPrompt || prompt_1.DEFAULT_SYSTEM_PROMPT,
+                    content: systemPrompt || this.opts.systemPrompt || prompt_1.DEFAULT_SYSTEM_PROMPT,
                 },
                 { role: "user", content: userContent },
             ],
@@ -30025,6 +30031,28 @@ class AiClient {
     }
 }
 exports.AiClient = AiClient;
+/**
+ * Serializa os achados candidatos para o JSON enviado à segunda opinião. Usa as
+ * mesmas chaves (snake_case) do contrato de saída, para o modelo poder copiá-las
+ * diretamente nos achados que mantiver.
+ */
+function serializeFindings(findings) {
+    const items = findings.map((f) => ({
+        path: f.path,
+        line: f.line,
+        vulnerability: f.vulnerability,
+        finding_type: f.findingType,
+        severity: f.severity,
+        confidence: f.confidence,
+        explanation: f.explanation,
+        evidence: f.evidence,
+        cwe: f.cwe,
+        fix: f.fix,
+        fix_code: f.fixCode,
+        fix_start_line: f.fixStartLine,
+    }));
+    return JSON.stringify(items, null, 2);
+}
 /** Faz o parse da saída do modelo em um ReviewResult, tolerando fences de markdown perdidos. */
 function parseReview(content) {
     const cleaned = stripFences(content).trim();
@@ -30148,6 +30176,7 @@ function annotateFile(file) {
     if (!file.patch)
         return null;
     const validLines = new Set();
+    const lineText = new Map();
     const out = [];
     let newLine = 0;
     for (const raw of file.patch.split("\n")) {
@@ -30165,6 +30194,7 @@ function annotateFile(file) {
         }
         if (raw.startsWith("+")) {
             validLines.add(newLine);
+            lineText.set(newLine, raw.slice(1));
             out.push(`${String(newLine).padStart(5, " ")}: ${raw.slice(1)}`);
             newLine += 1;
             continue;
@@ -30175,10 +30205,11 @@ function annotateFile(file) {
             continue;
         }
         validLines.add(newLine);
+        lineText.set(newLine, raw.slice(1));
         out.push(`${String(newLine).padStart(5, " ")}: ${raw.slice(1)}`);
         newLine += 1;
     }
-    return { path: file.path, annotated: out.join("\n"), validLines };
+    return { path: file.path, annotated: out.join("\n"), validLines, lineText };
 }
 /** Monta o texto completo do diff exibido ao modelo a partir dos arquivos anotados. */
 function renderDiff(files) {
@@ -30204,6 +30235,7 @@ exports.SEVERITY_ORDER = exports.SEVERITY_LABEL = void 0;
 exports.confidencePct = confidencePct;
 exports.findingTitle = findingTitle;
 exports.renderFinding = renderFinding;
+exports.reindentFix = reindentFix;
 exports.SEVERITY_LABEL = {
     critical: "🔴 Crítico",
     high: "🟠 Alto",
@@ -30251,6 +30283,41 @@ function renderFinding(f, opts = {}) {
         lines.push("", `**Correção:** ${f.fix}`);
     }
     return lines.join("\n");
+}
+/** Recuo (espaços/tabs iniciais) de uma linha. */
+function indentOf(line) {
+    return /^[ \t]*/.exec(line)?.[0] ?? "";
+}
+/**
+ * Reindenta o `fix_code` do modelo para o recuo da linha que ele substitui.
+ *
+ * O modelo costuma devolver a correção na coluna 0 mesmo quando a linha original
+ * está aninhada, e o bloco ```suggestion do GitHub troca a linha inteira —
+ * incluindo o recuo. Aplicar a sugestão como veio quebra o arquivo em linguagens
+ * sensíveis a indentação.
+ *
+ * A correção é um deslocamento uniforme: calcula-se o recuo base do próprio
+ * `fixCode` (o da sua primeira linha não vazia) e desloca-se o bloco inteiro até
+ * o recuo alvo, preservando a estrutura relativa entre as linhas. Se o bloco já
+ * chega com o recuo certo, nada muda. Blocos internamente inconsistentes não são
+ * consertados — apenas deslocados.
+ */
+function reindentFix(fixCode, targetLine) {
+    const lines = fixCode.split("\n");
+    const primeira = lines.find((l) => l.trim() !== "");
+    if (primeira === undefined)
+        return fixCode;
+    const base = indentOf(primeira);
+    const alvo = indentOf(targetLine);
+    if (base === alvo)
+        return fixCode;
+    // Só é seguro remover o recuo base se todas as linhas com conteúdo o tiverem.
+    const podeRemover = base === "" || lines.every((l) => l.trim() === "" || l.startsWith(base));
+    if (!podeRemover)
+        return fixCode;
+    return lines
+        .map((l) => (l.trim() === "" ? l : alvo + l.slice(base.length)))
+        .join("\n");
 }
 
 
@@ -30338,7 +30405,7 @@ async function getHeadSha(octokit, ctx) {
  * comentários inline; os demais são incorporados ao corpo do resumo para que
  * nada se perca.
  */
-async function postReview(octokit, ctx, commitId, result, validLinesByFile) {
+async function postReview(octokit, ctx, commitId, result, validLinesByFile, lineTextByFile) {
     const inline = [];
     const orphaned = [];
     for (const f of result.findings) {
@@ -30349,11 +30416,18 @@ async function postReview(octokit, ctx, commitId, result, validLinesByFile) {
             const rangeValid = start === undefined ||
                 rangeInDiff(valid, start, f.line);
             const asSuggestion = Boolean(f.fixCode) && rangeValid;
+            // O modelo devolve o fix_code frequentemente na coluna 0, mesmo quando a
+            // linha substituída está aninhada. Como o bloco ```suggestion troca a
+            // linha inteira, aplicá-lo assim quebraria o arquivo.
+            const alvo = lineTextByFile.get(f.path)?.get(start ?? f.line);
+            const ajustado = asSuggestion && f.fixCode && alvo !== undefined
+                ? { ...f, fixCode: (0, format_1.reindentFix)(f.fixCode, alvo) }
+                : f;
             const comment = {
                 path: f.path,
                 line: f.line,
                 side: "RIGHT",
-                body: (0, format_1.renderFinding)(f, { asSuggestion }),
+                body: (0, format_1.renderFinding)(ajustado, { asSuggestion }),
             };
             if (asSuggestion && start !== undefined) {
                 comment.start_line = start;
@@ -30555,14 +30629,46 @@ function parseMinConfidence(raw) {
     }
     return value;
 }
+/**
+ * Segunda chamada à IA: reenvia o mesmo material da primeira revisão junto com
+ * os achados que ela produziu, e mantém apenas os que sobrevivem a uma auditoria
+ * cética. O critério é assimétrico por desenho — qualquer dúvida descarta o
+ * achado —, então esta passagem só reduz o conjunto, nunca o amplia.
+ *
+ * Roda sempre que houver candidatos. Se a chamada falhar, o erro sobe: publicar
+ * os candidatos sem auditoria seria pior que falhar visivelmente.
+ */
+async function segundaOpiniao(client, diffText, candidatos) {
+    if (candidatos.length === 0)
+        return { summary: "", findings: candidatos };
+    core.info(`Auditando ${candidatos.length} achado(s) candidato(s) em uma segunda chamada...`);
+    const auditado = await client.review((0, prompt_1.buildSecondOpinionUserPrompt)(diffText, (0, ai_1.serializeFindings)(candidatos)), prompt_1.SECOND_OPINION_SYSTEM_PROMPT);
+    // A segunda opinião não pode inventar achados: mantém-se apenas o que casa
+    // com um candidato original (mesmo arquivo e mesma linha).
+    const chaves = new Set(candidatos.map((f) => `${f.path}:${f.line}`));
+    const confirmados = auditado.findings.filter((f) => chaves.has(`${f.path}:${f.line}`));
+    // Os dois motivos de exclusão são contados em separado: um achado "não
+    // devolvido" foi julgado falso positivo pela auditoria; um achado "fora da
+    // lista" foi barrado pelo guard por não corresponder a nenhum candidato.
+    const naoDevolvidos = candidatos.length - auditado.findings.length;
+    const foraDaLista = auditado.findings.length - confirmados.length;
+    core.info(`${confirmados.length} de ${candidatos.length} achado(s) confirmado(s) na auditoria.`);
+    if (naoDevolvidos > 0) {
+        core.info(`  ${naoDevolvidos} descartado(s) pela auditoria como falso positivo.`);
+    }
+    if (foraDaLista > 0) {
+        core.warning(`  ${foraDaLista} achado(s) da auditoria não correspondem a nenhum candidato ` +
+            `(path:line divergente) e foram bloqueados pelo guard.`);
+    }
+    return { summary: auditado.summary, findings: confirmados };
+}
 /** Descarta os achados cuja confiança reportada fica abaixo do mínimo configurado. */
 function filterByConfidence(candidates, minConfidence) {
     return candidates.filter((f) => f.confidence >= minConfidence);
 }
 /**
- * Separa vulnerabilidades de recomendações preventivas. Só as vulnerabilidades
- * são publicadas como achados de segurança; o hardening é preservado, mas fica
- * restrito a uma linha no resumo — sem comentário inline e sem commit suggestion.
+ * Separa vulnerabilidades de recomendações preventivas, segundo a classificação
+ * declarada pelo próprio modelo em `finding_type`.
  */
 function splitByFindingType(findings) {
     return {
@@ -30570,14 +30676,23 @@ function splitByFindingType(findings) {
         hardening: findings.filter((f) => f.findingType === "hardening"),
     };
 }
-/** Acrescenta ao resumo a lista de recomendações preventivas, quando houver. */
-function appendHardeningToSummary(summary, hardening) {
-    if (hardening.length === 0)
-        return summary;
-    const itens = hardening
-        .map((f) => `${f.vulnerability} (\`${f.path}:${f.line}\`)`)
-        .join("; ");
-    return `${summary}\n\n**Recomendações preventivas** (não classificadas como vulnerabilidade): ${itens}`;
+/**
+ * Descarta os achados classificados como "hardening" pelo próprio modelo. Eles
+ * saem do fluxo no momento da classificação: não são auditados nem publicados,
+ * porque a ferramenta reporta vulnerabilidade, não recomendação preventiva.
+ *
+ * Os títulos descartados vão para o log da action — sem isso, um achado real
+ * rebaixado por engano some sem deixar rastro algum.
+ */
+function descartarHardening(findings) {
+    const { vulnerabilities, hardening } = splitByFindingType(findings);
+    if (hardening.length > 0) {
+        core.info(`${hardening.length} achado(s) descartado(s) por serem hardening, não vulnerabilidade:`);
+        for (const f of hardening) {
+            core.info(`  - ${f.vulnerability} (${f.path}:${f.line})`);
+        }
+    }
+    return vulnerabilities;
 }
 /** Loga uma re-tentativa da chamada à IA no log da action. */
 function logRetry(attempt, status, waitMs) {
@@ -30610,6 +30725,7 @@ async function runPrReview(opts) {
         return;
     }
     const validLinesByFile = new Map(annotated.map((f) => [f.path, f.validLines]));
+    const lineTextByFile = new Map(annotated.map((f) => [f.path, f.lineText]));
     core.info(`Enviando ${annotated.length} arquivo(s) para o modelo ${opts.model} revisar...`);
     const client = new ai_1.AiClient({
         baseUrl: opts.baseUrl,
@@ -30620,16 +30736,20 @@ async function runPrReview(opts) {
         maxRetries: opts.maxRetries,
         onRetry: logRetry,
     });
-    const result = await client.review((0, prompt_1.buildUserPrompt)((0, diff_1.renderDiff)(annotated)));
+    const diffText = (0, diff_1.renderDiff)(annotated);
+    const result = await client.review((0, prompt_1.buildUserPrompt)(diffText));
     core.info(`A IA retornou ${result.findings.length} achado(s) candidato(s).`);
-    const { vulnerabilities, hardening } = splitByFindingType(filterByConfidence(result.findings, opts.minConfidence));
-    core.info(`${vulnerabilities.length} vulnerabilidade(s) e ${hardening.length} recomendação(ões) ` +
-        `de hardening após o filtro de confiança mínima.`);
-    result.findings = vulnerabilities;
-    result.summary = appendHardeningToSummary(result.summary, hardening);
+    const vulnerabilidades = descartarHardening(result.findings);
+    const auditoria = await segundaOpiniao(client, diffText, vulnerabilidades);
+    // O resumo publicado passa a ser o da auditoria: manter o da primeira revisão
+    // faria o corpo do PR descrever vulnerabilidades que foram descartadas.
+    if (auditoria.summary)
+        result.summary = auditoria.summary;
+    result.findings = filterByConfidence(auditoria.findings, opts.minConfidence);
+    core.info(`${result.findings.length} achado(s) após o filtro de confiança mínima.`);
     core.setOutput("findings-count", String(result.findings.length));
     const headSha = await (0, github_1.getHeadSha)(octokit, ctx);
-    await (0, github_1.postReview)(octokit, ctx, headSha, result, validLinesByFile);
+    await (0, github_1.postReview)(octokit, ctx, headSha, result, validLinesByFile, lineTextByFile);
     core.info("Revisão postada no pull request.");
     if (opts.failOnFindings && result.findings.length > 0) {
         core.setFailed(`${result.findings.length} achado(s) reportado(s) pela revisão da IA.`);
@@ -30677,20 +30797,17 @@ async function runFullScan(opts) {
     });
     const merged = { summary: "", findings: [] };
     const summaries = [];
-    const hardening = [];
     for (let i = 0; i < batches.length; i++) {
         core.info(`Revisando lote ${i + 1}/${batches.length}...`);
-        const result = await client.review((0, prompt_1.buildFullUserPrompt)((0, diff_1.renderDiff)(batches[i])));
-        const split = splitByFindingType(filterByConfidence(result.findings, opts.minConfidence));
-        merged.findings.push(...split.vulnerabilities);
-        hardening.push(...split.hardening);
-        if (result.summary)
-            summaries.push(result.summary);
+        const batchText = (0, diff_1.renderDiff)(batches[i]);
+        const result = await client.review((0, prompt_1.buildFullUserPrompt)(batchText));
+        const auditoria = await segundaOpiniao(client, batchText, descartarHardening(result.findings));
+        merged.findings.push(...filterByConfidence(auditoria.findings, opts.minConfidence));
+        const resumoLote = auditoria.summary || result.summary;
+        if (resumoLote)
+            summaries.push(resumoLote);
     }
-    merged.summary = appendHardeningToSummary(summaries.join(" "), hardening);
-    if (hardening.length > 0) {
-        core.info(`${hardening.length} recomendação(ões) de hardening fora do relatório de segurança.`);
-    }
+    merged.summary = summaries.join(" ");
     core.info(`A IA retornou ${merged.findings.length} achado(s).`);
     core.setOutput("findings-count", String(merged.findings.length));
     await (0, report_1.reportScanResults)(merged, reportPath);
@@ -30713,9 +30830,10 @@ run().catch((err) => {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.DEFAULT_FULL_SYSTEM_PROMPT = exports.DEFAULT_SYSTEM_PROMPT = void 0;
+exports.SECOND_OPINION_SYSTEM_PROMPT = exports.DEFAULT_FULL_SYSTEM_PROMPT = exports.DEFAULT_SYSTEM_PROMPT = void 0;
 exports.buildUserPrompt = buildUserPrompt;
 exports.buildFullUserPrompt = buildFullUserPrompt;
+exports.buildSecondOpinionUserPrompt = buildSecondOpinionUserPrompt;
 exports.DEFAULT_SYSTEM_PROMPT = `Você é o SCAIA, um revisor de código sênior, preciso e pragmático.
 
 Você recebe os arquivos alterados de um pull request do GitHub como diffs no
@@ -30739,13 +30857,13 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
     {
       "path": "<caminho do arquivo exatamente como recebido>",
       "line": <número inteiro da linha, vindo das anotações do lado NOVO>,
-      "vulnerability": "<título curto do tipo do problema, ex.: SQL Injection>",
+      "vulnerability": "<título curto do tipo do problema, ex.: Cross-Site Scripting>",
       "finding_type": "vulnerability" | "hardening",
       "severity": "critical" | "high" | "medium" | "low",
       "confidence": <número de 0 a 1 indicando sua confiança no achado>,
       "explanation": "<explicação concisa do porquê isto é um problema>",
       "evidence": "<trecho de código relevante que demonstra o problema>",
-      "cwe": "<identificador CWE quando aplicável, ex.: CWE-89, senão omita>",
+      "cwe": "<identificador CWE quando aplicável, ex.: CWE-79, senão omita>",
       "fix": "<descrição curta da correção sugerida>",
       "fix_code": "<código exato que substitui a(s) linha(s) do problema, quando você puder produzir uma correção direta; senão omita>",
       "fix_start_line": <primeira linha substituída por fix_code, para correções multi-linha; omita se for só a linha em "line">
@@ -30758,7 +30876,7 @@ Regras:
 - "confidence" é um número entre 0 e 1 (ex.: 0.91). Seja honesto: baixa confiança para suspeitas, alta para problemas claros.
 - "finding_type" é "vulnerability" APENAS quando o código exibido apresenta evidência concreta da falha: você consegue descrever um valor de entrada que, dado exatamente este código, produz o efeito malicioso. Caso contrário, use "hardening".
 - Use "hardening" quando o problema for condicional ("pode", "caso não seja validado"), quando depender de código que não foi exibido, ou quando for recomendação preventiva sobre código que já aplica a mitigação padrão.
-- Se o trecho exibido já contém a barreira que neutraliza o vetor — binding de parâmetro separado da string SQL, lista de argumentos passada sem shell, remoção de separadores de caminho, allowlist, hash com salt — então NÃO é uma vulnerabilidade, por mais que o padrão pareça arriscado à primeira vista.
+- Se o trecho exibido já contém uma barreira que neutraliza o vetor de ataque descrito, o achado não é uma vulnerabilidade, ela já está mitigada. Por isso, antes de reportar, verifique se o dado já não faz uma validação que impede o efeito malicioso.
 - Não reporte risco meramente potencial como "vulnerability".
 - "cwe" é obrigatório quando "finding_type" é "vulnerability"; quando for "hardening", omita o campo.
 - "evidence" deve citar o trecho exato do código exibido, não invente.
@@ -30793,13 +30911,13 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
     {
       "path": "<caminho do arquivo exatamente como recebido>",
       "line": <número inteiro da linha, vindo das anotações>,
-      "vulnerability": "<título curto do tipo do problema, ex.: SQL Injection>",
+      "vulnerability": "<título curto do tipo do problema, ex.: Cross-Site Scripting>",
       "finding_type": "vulnerability" | "hardening",
       "severity": "critical" | "high" | "medium" | "low",
       "confidence": <número de 0 a 1 indicando sua confiança no achado>,
       "explanation": "<explicação concisa do porquê isto é um problema>",
       "evidence": "<trecho de código relevante que demonstra o problema>",
-      "cwe": "<identificador CWE quando aplicável, ex.: CWE-89, senão omita>",
+      "cwe": "<identificador CWE quando aplicável, ex.: CWE-79, senão omita>",
       "fix": "<descrição curta da correção sugerida>",
       "fix_code": "<código exato que substitui a(s) linha(s) do problema, quando você puder produzir uma correção direta; senão omita>",
       "fix_start_line": <primeira linha substituída por fix_code, para correções multi-linha; omita se for só a linha em "line">
@@ -30812,7 +30930,7 @@ Regras:
 - "confidence" é um número entre 0 e 1 (ex.: 0.91). Seja honesto: baixa confiança para suspeitas, alta para problemas claros.
 - "finding_type" é "vulnerability" APENAS quando o código exibido apresenta evidência concreta da falha: você consegue descrever um valor de entrada que, dado exatamente este código, produz o efeito malicioso. Caso contrário, use "hardening".
 - Use "hardening" quando o problema for condicional ("pode", "caso não seja validado"), quando depender de código que não foi exibido, ou quando for recomendação preventiva sobre código que já aplica a mitigação padrão.
-- Se o trecho exibido já contém a barreira que neutraliza o vetor — binding de parâmetro separado da string SQL, lista de argumentos passada sem shell, remoção de separadores de caminho, allowlist, hash com salt — então NÃO é uma vulnerabilidade, por mais que o padrão pareça arriscado à primeira vista.
+- Se o trecho exibido já contém uma barreira que neutraliza o vetor de ataque descrito, o achado não é uma vulnerabilidade, ela já está mitigada. Por isso, antes de reportar, verifique se o dado já não faz uma validação que impede o efeito malicioso.
 - Não reporte risco meramente potencial como "vulnerability".
 - "cwe" é obrigatório quando "finding_type" é "vulnerability"; quando for "hardening", omita o campo.
 - "evidence" deve citar o trecho exato do código exibido, não invente.
@@ -30824,6 +30942,76 @@ Regras:
 - Responda somente com JSON válido.`;
 function buildFullUserPrompt(diffText) {
     return `Aqui estão os arquivos do repositório para revisar.\n\n${diffText}`;
+}
+exports.SECOND_OPINION_SYSTEM_PROMPT = `Você é o SCAIA atuando como segundo revisor: um auditor cético que decide, um a
+um, se os achados de uma primeira revisão automatizada de códigos são falsos positivos,
+antes de qualquer alerta ou correção possa chegar ao desenvolvedor.
+
+Você recebe:
+1. Exatamente o mesmo material que a primeira revisão recebeu — os arquivos em
+   formato anotado, com os números de linha do lado novo.
+2. Os achados que a primeira revisão produziu, em JSON.
+
+Para CADA achado candidato, faça uma única pergunta: "isto é um falso positivo?"
+
+Responda-a reconstruindo o caminho do dado dentro do código exibido:
+- de onde vem o dado citado na evidência (parâmetro de requisição, argumento de
+  linha de comando, corpo, leitura de arquivo, valor literal)?
+- que transformações, validações, conversões ele atravessa até o ponto
+  apontado pelo achado?
+- alguma dessas etapas já impede, sozinha, o efeito descrito no achado?
+- existe um valor de entrada concreto que, dado exatamente este código, produz o
+  efeito malicioso descrito?
+
+O critério de decisão é deliberadamente assimétrico:
+
+MANTENHA o achado somente se você tiver convicção de que ele é verdadeiro: você
+consegue nomear o valor de entrada concreto que produz o efeito descrito, e
+nenhuma etapa do código exibido o neutraliza.
+
+DESCARTE o achado se houver QUALQUER dúvida. Descarte, entre outros casos, se:
+- você não conseguir construir o valor de entrada concreto que o comprove;
+- o problema depender de código que não foi exibido;
+- a explicação do achado for condicional ("pode", "caso não seja validado",
+  "dependendo de", "se o dado não for confiável");
+- a operação apontada já estiver protegida por alguma etapa anterior;
+- o rótulo ou a classificação não corresponderem ao problema real;
+- você simplesmente não tiver certeza.
+
+Na dúvida, descarte. É preferível não reportar nada a publicar um alerta falso.
+
+Não invente achados novos: você só pode manter ou descartar os candidatos
+recebidos. Não avalie trechos de código fora da evidência de cada achado.
+
+Você DEVE responder com um único objeto JSON e nada mais, no mesmo formato da
+revisão original:
+
+{
+  "summary": "<1 a 2 frases sobre o que sobreviveu à verificação e por quê>",
+  "findings": [
+    {
+      "path": "<copiado do achado candidato>",
+      "line": <copiado do achado candidato>,
+      "vulnerability": "<copiado do achado candidato>",
+      "finding_type": "<copiado do achado candidato>",
+      "severity": "critical" | "high" | "medium" | "low",
+      "confidence": <sua confiança após a verificação, 0 a 1>,
+      "explanation": "<explicação original, acrescida do valor de entrada concreto que a comprova>",
+      "evidence": "<copiado do achado candidato>",
+      "cwe": "<copiado do achado candidato, quando aplicável>",
+      "fix": "<copiado do achado candidato>",
+      "fix_code": "<copiado do achado candidato, quando presente>",
+      "fix_start_line": <copiado do achado candidato, quando presente>
+    }
+  ]
+}
+
+Inclua em "findings" APENAS os achados que sobreviveram. Se nenhum sobreviver,
+retorne "findings": [] e registre em "summary" que nenhuma falha foi confirmada.
+Escreva "summary" e "explanation" em português do Brasil. Responda somente com
+JSON válido.`;
+function buildSecondOpinionUserPrompt(diffText, candidatesJson) {
+    return `Material revisado pela primeira revisão:\n\n${diffText}\n\nAchados que a primeira revisão produziu, em JSON:\n\n${candidatesJson}\n\nPara cada achado, decida se é um falso positivo, seguindo o critério das suas instruções.`;
 }
 
 
@@ -30880,14 +31068,16 @@ function annotateRepoFile(path, maxBytes) {
     if (content.includes(String.fromCharCode(0)))
         return null;
     const validLines = new Set();
+    const lineText = new Map();
     const out = [];
     const lines = content.split("\n");
     for (let i = 0; i < lines.length; i++) {
         const lineNo = i + 1;
         validLines.add(lineNo);
+        lineText.set(lineNo, lines[i]);
         out.push(`${String(lineNo).padStart(5, " ")}: ${lines[i]}`);
     }
-    return { path, annotated: out.join("\n"), validLines };
+    return { path, annotated: out.join("\n"), validLines, lineText };
 }
 /**
  * Quebra os arquivos anotados em lotes cujo tamanho renderizado fica abaixo do

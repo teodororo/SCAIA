@@ -15,6 +15,12 @@ export interface AnnotatedFile {
   annotated: string;
   /** Conjunto de números de linha válidos no lado novo que um comentário pode alvejar. */
   validLines: Set<number>;
+  /**
+   * Texto original de cada linha do lado novo, indexado pelo número da linha.
+   * Usado para reindentar o `fix_code` do modelo pelo recuo da linha que ele
+   * substitui — sem isso, uma sugestão devolvida na coluna 0 quebra o arquivo.
+   */
+  lineText: Map<number, string>;
 }
 
 /**
@@ -36,6 +42,7 @@ export function annotateFile(file: ChangedFile): AnnotatedFile | null {
   if (!file.patch) return null;
 
   const validLines = new Set<number>();
+  const lineText = new Map<number, string>();
   const out: string[] = [];
   let newLine = 0;
 
@@ -55,6 +62,7 @@ export function annotateFile(file: ChangedFile): AnnotatedFile | null {
 
     if (raw.startsWith("+")) {
       validLines.add(newLine);
+      lineText.set(newLine, raw.slice(1));
       out.push(`${String(newLine).padStart(5, " ")}: ${raw.slice(1)}`);
       newLine += 1;
       continue;
@@ -66,11 +74,12 @@ export function annotateFile(file: ChangedFile): AnnotatedFile | null {
       continue;
     }
     validLines.add(newLine);
+    lineText.set(newLine, raw.slice(1));
     out.push(`${String(newLine).padStart(5, " ")}: ${raw.slice(1)}`);
     newLine += 1;
   }
 
-  return { path: file.path, annotated: out.join("\n"), validLines };
+  return { path: file.path, annotated: out.join("\n"), validLines, lineText };
 }
 
 /** Monta o texto completo do diff exibido ao modelo a partir dos arquivos anotados. */

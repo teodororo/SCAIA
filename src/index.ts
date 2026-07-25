@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import { AiClient, type ReviewResult } from "./ai";
+import { AiClient, serializeFindings, type ReviewResult } from "./ai";
 import { annotateFile, renderDiff, type AnnotatedFile } from "./diff";
 import {
   getHeadSha,
@@ -12,7 +12,9 @@ import {
 import {
   DEFAULT_FULL_SYSTEM_PROMPT,
   DEFAULT_SYSTEM_PROMPT,
+  SECOND_OPINION_SYSTEM_PROMPT,
   buildFullUserPrompt,
+  buildSecondOpinionUserPrompt,
   buildUserPrompt,
 } from "./prompt";
 import { reportScanResults } from "./report";
@@ -118,6 +120,54 @@ interface CommonOpts {
   minConfidence: number;
 }
 
+/**
+ * Segunda chamada à IA: reenvia o mesmo material da primeira revisão junto com
+ * os achados que ela produziu, e mantém apenas os que sobrevivem a uma auditoria
+ * cética. O critério é assimétrico por desenho — qualquer dúvida descarta o
+ * achado —, então esta passagem só reduz o conjunto, nunca o amplia.
+ *
+ * Roda sempre que houver candidatos. Se a chamada falhar, o erro sobe: publicar
+ * os candidatos sem auditoria seria pior que falhar visivelmente.
+ */
+async function segundaOpiniao(
+  client: AiClient,
+  diffText: string,
+  candidatos: ReviewResult["findings"]
+): Promise<ReviewResult> {
+  if (candidatos.length === 0) return { summary: "", findings: candidatos };
+
+  core.info(`Auditando ${candidatos.length} achado(s) candidato(s) em uma segunda chamada...`);
+  const auditado = await client.review(
+    buildSecondOpinionUserPrompt(diffText, serializeFindings(candidatos)),
+    SECOND_OPINION_SYSTEM_PROMPT
+  );
+
+  // A segunda opinião não pode inventar achados: mantém-se apenas o que casa
+  // com um candidato original (mesmo arquivo e mesma linha).
+  const chaves = new Set(candidatos.map((f) => `${f.path}:${f.line}`));
+  const confirmados = auditado.findings.filter((f) => chaves.has(`${f.path}:${f.line}`));
+
+  // Os dois motivos de exclusão são contados em separado: um achado "não
+  // devolvido" foi julgado falso positivo pela auditoria; um achado "fora da
+  // lista" foi barrado pelo guard por não corresponder a nenhum candidato.
+  const naoDevolvidos = candidatos.length - auditado.findings.length;
+  const foraDaLista = auditado.findings.length - confirmados.length;
+  core.info(
+    `${confirmados.length} de ${candidatos.length} achado(s) confirmado(s) na auditoria.`
+  );
+  if (naoDevolvidos > 0) {
+    core.info(`  ${naoDevolvidos} descartado(s) pela auditoria como falso positivo.`);
+  }
+  if (foraDaLista > 0) {
+    core.warning(
+      `  ${foraDaLista} achado(s) da auditoria não correspondem a nenhum candidato ` +
+        `(path:line divergente) e foram bloqueados pelo guard.`
+    );
+  }
+
+  return { summary: auditado.summary, findings: confirmados };
+}
+
 /** Descarta os achados cuja confiança reportada fica abaixo do mínimo configurado. */
 function filterByConfidence(
   candidates: ReviewResult["findings"],
@@ -127,9 +177,8 @@ function filterByConfidence(
 }
 
 /**
- * Separa vulnerabilidades de recomendações preventivas. Só as vulnerabilidades
- * são publicadas como achados de segurança; o hardening é preservado, mas fica
- * restrito a uma linha no resumo — sem comentário inline e sem commit suggestion.
+ * Separa vulnerabilidades de recomendações preventivas, segundo a classificação
+ * declarada pelo próprio modelo em `finding_type`.
  */
 function splitByFindingType(findings: ReviewResult["findings"]): {
   vulnerabilities: ReviewResult["findings"];
@@ -141,16 +190,27 @@ function splitByFindingType(findings: ReviewResult["findings"]): {
   };
 }
 
-/** Acrescenta ao resumo a lista de recomendações preventivas, quando houver. */
-function appendHardeningToSummary(
-  summary: string,
-  hardening: ReviewResult["findings"]
-): string {
-  if (hardening.length === 0) return summary;
-  const itens = hardening
-    .map((f) => `${f.vulnerability} (\`${f.path}:${f.line}\`)`)
-    .join("; ");
-  return `${summary}\n\n**Recomendações preventivas** (não classificadas como vulnerabilidade): ${itens}`;
+/**
+ * Descarta os achados classificados como "hardening" pelo próprio modelo. Eles
+ * saem do fluxo no momento da classificação: não são auditados nem publicados,
+ * porque a ferramenta reporta vulnerabilidade, não recomendação preventiva.
+ *
+ * Os títulos descartados vão para o log da action — sem isso, um achado real
+ * rebaixado por engano some sem deixar rastro algum.
+ */
+function descartarHardening(
+  findings: ReviewResult["findings"]
+): ReviewResult["findings"] {
+  const { vulnerabilities, hardening } = splitByFindingType(findings);
+  if (hardening.length > 0) {
+    core.info(
+      `${hardening.length} achado(s) descartado(s) por serem hardening, não vulnerabilidade:`
+    );
+    for (const f of hardening) {
+      core.info(`  - ${f.vulnerability} (${f.path}:${f.line})`);
+    }
+  }
+  return vulnerabilities;
 }
 
 /** Loga uma re-tentativa da chamada à IA no log da action. */
@@ -196,6 +256,9 @@ async function runPrReview(
   const validLinesByFile = new Map(
     annotated.map((f) => [f.path, f.validLines] as const)
   );
+  const lineTextByFile = new Map(
+    annotated.map((f) => [f.path, f.lineText] as const)
+  );
 
   core.info(`Enviando ${annotated.length} arquivo(s) para o modelo ${opts.model} revisar...`);
   const client = new AiClient({
@@ -207,22 +270,21 @@ async function runPrReview(
     maxRetries: opts.maxRetries,
     onRetry: logRetry,
   });
-  const result = await client.review(buildUserPrompt(renderDiff(annotated)));
+  const diffText = renderDiff(annotated);
+  const result = await client.review(buildUserPrompt(diffText));
   core.info(`A IA retornou ${result.findings.length} achado(s) candidato(s).`);
 
-  const { vulnerabilities, hardening } = splitByFindingType(
-    filterByConfidence(result.findings, opts.minConfidence)
-  );
-  core.info(
-    `${vulnerabilities.length} vulnerabilidade(s) e ${hardening.length} recomendação(ões) ` +
-      `de hardening após o filtro de confiança mínima.`
-  );
-  result.findings = vulnerabilities;
-  result.summary = appendHardeningToSummary(result.summary, hardening);
+  const vulnerabilidades = descartarHardening(result.findings);
+  const auditoria = await segundaOpiniao(client, diffText, vulnerabilidades);
+  // O resumo publicado passa a ser o da auditoria: manter o da primeira revisão
+  // faria o corpo do PR descrever vulnerabilidades que foram descartadas.
+  if (auditoria.summary) result.summary = auditoria.summary;
+  result.findings = filterByConfidence(auditoria.findings, opts.minConfidence);
+  core.info(`${result.findings.length} achado(s) após o filtro de confiança mínima.`);
   core.setOutput("findings-count", String(result.findings.length));
 
   const headSha = await getHeadSha(octokit, ctx);
-  await postReview(octokit, ctx, headSha, result, validLinesByFile);
+  await postReview(octokit, ctx, headSha, result, validLinesByFile, lineTextByFile);
   core.info("Revisão postada no pull request.");
 
   if (opts.failOnFindings && result.findings.length > 0) {
@@ -285,21 +347,20 @@ async function runFullScan(opts: CommonOpts): Promise<void> {
 
   const merged: ReviewResult = { summary: "", findings: [] };
   const summaries: string[] = [];
-  const hardening: ReviewResult["findings"] = [];
   for (let i = 0; i < batches.length; i++) {
     core.info(`Revisando lote ${i + 1}/${batches.length}...`);
-    const result = await client.review(buildFullUserPrompt(renderDiff(batches[i])));
-    const split = splitByFindingType(
-      filterByConfidence(result.findings, opts.minConfidence)
+    const batchText = renderDiff(batches[i]);
+    const result = await client.review(buildFullUserPrompt(batchText));
+    const auditoria = await segundaOpiniao(
+      client,
+      batchText,
+      descartarHardening(result.findings)
     );
-    merged.findings.push(...split.vulnerabilities);
-    hardening.push(...split.hardening);
-    if (result.summary) summaries.push(result.summary);
+    merged.findings.push(...filterByConfidence(auditoria.findings, opts.minConfidence));
+    const resumoLote = auditoria.summary || result.summary;
+    if (resumoLote) summaries.push(resumoLote);
   }
-  merged.summary = appendHardeningToSummary(summaries.join(" "), hardening);
-  if (hardening.length > 0) {
-    core.info(`${hardening.length} recomendação(ões) de hardening fora do relatório de segurança.`);
-  }
+  merged.summary = summaries.join(" ");
 
   core.info(`A IA retornou ${merged.findings.length} achado(s).`);
   core.setOutput("findings-count", String(merged.findings.length));

@@ -91,13 +91,18 @@ export class AiClient {
     this.endpoint = `${base}/chat/completions`;
   }
 
-  async review(userContent: string): Promise<ReviewResult> {
+  /**
+   * `systemPrompt`, quando informado, substitui o system prompt do cliente só
+   * nesta chamada — usado pela segunda opinião, que roda com outro prompt mas
+   * reaproveita o mesmo cliente (mesmo modelo, token e temperatura).
+   */
+  async review(userContent: string, systemPrompt?: string): Promise<ReviewResult> {
     const body: Record<string, unknown> = {
       model: this.opts.model,
       messages: [
         {
           role: "system",
-          content: this.opts.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+          content: systemPrompt || this.opts.systemPrompt || DEFAULT_SYSTEM_PROMPT,
         },
         { role: "user", content: userContent },
       ],
@@ -156,6 +161,29 @@ export class AiClient {
 
     throw new Error(`Requisição à IA falhou: ${lastError}`);
   }
+}
+
+/**
+ * Serializa os achados candidatos para o JSON enviado à segunda opinião. Usa as
+ * mesmas chaves (snake_case) do contrato de saída, para o modelo poder copiá-las
+ * diretamente nos achados que mantiver.
+ */
+export function serializeFindings(findings: Finding[]): string {
+  const items = findings.map((f) => ({
+    path: f.path,
+    line: f.line,
+    vulnerability: f.vulnerability,
+    finding_type: f.findingType,
+    severity: f.severity,
+    confidence: f.confidence,
+    explanation: f.explanation,
+    evidence: f.evidence,
+    cwe: f.cwe,
+    fix: f.fix,
+    fix_code: f.fixCode,
+    fix_start_line: f.fixStartLine,
+  }));
+  return JSON.stringify(items, null, 2);
 }
 
 /** Faz o parse da saída do modelo em um ReviewResult, tolerando fences de markdown perdidos. */

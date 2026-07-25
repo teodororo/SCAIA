@@ -1,7 +1,7 @@
 import * as github from "@actions/github";
 import type { ChangedFile } from "./diff";
 import type { Finding, ReviewResult } from "./ai";
-import { renderFinding } from "./format";
+import { reindentFix, renderFinding } from "./format";
 
 type Octokit = ReturnType<typeof github.getOctokit>;
 
@@ -64,7 +64,8 @@ export async function postReview(
   ctx: PrContext,
   commitId: string,
   result: ReviewResult,
-  validLinesByFile: Map<string, Set<number>>
+  validLinesByFile: Map<string, Set<number>>,
+  lineTextByFile: Map<string, Map<number, string>>
 ): Promise<void> {
   interface InlineComment {
     path: string;
@@ -88,11 +89,20 @@ export async function postReview(
         rangeInDiff(valid, start, f.line);
       const asSuggestion = Boolean(f.fixCode) && rangeValid;
 
+      // O modelo devolve o fix_code frequentemente na coluna 0, mesmo quando a
+      // linha substituída está aninhada. Como o bloco ```suggestion troca a
+      // linha inteira, aplicá-lo assim quebraria o arquivo.
+      const alvo = lineTextByFile.get(f.path)?.get(start ?? f.line);
+      const ajustado =
+        asSuggestion && f.fixCode && alvo !== undefined
+          ? { ...f, fixCode: reindentFix(f.fixCode, alvo) }
+          : f;
+
       const comment: InlineComment = {
         path: f.path,
         line: f.line,
         side: "RIGHT",
-        body: renderFinding(f, { asSuggestion }),
+        body: renderFinding(ajustado, { asSuggestion }),
       };
       if (asSuggestion && start !== undefined) {
         comment.start_line = start;
