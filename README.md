@@ -114,6 +114,7 @@ jobs:
 | `max-chars-per-request` | não         | `100000`                    | (modo `full`) Orçamento de caracteres por requisição à IA (envio em lotes).             |
 | `report-path`           | não         | `scaia-report.md`           | (modo `full`) Caminho do arquivo Markdown de relatório gerado.                           |
 | `fail-on-findings`      | não         | `false`                     | Falha o job quando a IA reporta qualquer achado.                                          |
+| `min-confidence`        | não         | `0.8`                       | Confiança mínima (0-1) para um achado ser publicado.                                      |
 
 ## Outputs
 

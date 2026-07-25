@@ -4,6 +4,12 @@ export interface Finding {
   path: string;
   line: number;
   severity: "critical" | "high" | "medium" | "low";
+  /**
+   * Natureza do achado, declarada pelo modelo: "vulnerability" para falha com
+   * evidência concreta no código exibido, "hardening" para recomendação
+   * preventiva. Só achados "vulnerability" viram comentário de segurança.
+   */
+  findingType: "vulnerability" | "hardening";
   /** Título/tipo do problema, ex.: "SQL Injection". */
   vulnerability: string;
   /** Confiança do modelo no achado, de 0 a 1. */
@@ -177,6 +183,7 @@ export function parseReview(content: string): ReviewResult {
       path,
       line,
       severity: normalizeSeverity(f.severity),
+      findingType: normalizeFindingType(f.finding_type),
       vulnerability: str(f.vulnerability) || str(f.title) || "Problema",
       confidence: normalizeConfidence(f.confidence),
       explanation,
@@ -222,6 +229,15 @@ function normalizeCwe(value: unknown): string | undefined {
   if (!s) return undefined;
   const m = /(\d+)/.exec(s);
   return m ? `CWE-${m[1]}` : s;
+}
+
+/**
+ * Normaliza `finding_type`. O default é "vulnerability" de propósito: um modelo
+ * que ignore o campo mantém o comportamento anterior, de modo que a introdução
+ * do contrato nunca esconda um achado por omissão.
+ */
+function normalizeFindingType(value: unknown): Finding["findingType"] {
+  return str(value).toLowerCase() === "hardening" ? "hardening" : "vulnerability";
 }
 
 function normalizeSeverity(value: unknown): Finding["severity"] {

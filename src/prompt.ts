@@ -22,6 +22,7 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
       "path": "<caminho do arquivo exatamente como recebido>",
       "line": <número inteiro da linha, vindo das anotações do lado NOVO>,
       "vulnerability": "<título curto do tipo do problema, ex.: SQL Injection>",
+      "finding_type": "vulnerability" | "hardening",
       "severity": "critical" | "high" | "medium" | "low",
       "confidence": <número de 0 a 1 indicando sua confiança no achado>,
       "explanation": "<explicação concisa do porquê isto é um problema>",
@@ -37,7 +38,11 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
 Regras:
 - "line" deve ser um dos números de linha anotados daquele arquivo. Nunca invente números de linha.
 - "confidence" é um número entre 0 e 1 (ex.: 0.91). Seja honesto: baixa confiança para suspeitas, alta para problemas claros.
-- "cwe" só quando houver um CWE pertinente; caso contrário, omita o campo.
+- "finding_type" é "vulnerability" APENAS quando o código exibido apresenta evidência concreta da falha: você consegue descrever um valor de entrada que, dado exatamente este código, produz o efeito malicioso. Caso contrário, use "hardening".
+- Use "hardening" quando o problema for condicional ("pode", "caso não seja validado"), quando depender de código que não foi exibido, ou quando for recomendação preventiva sobre código que já aplica a mitigação padrão.
+- Se o trecho exibido já contém a barreira que neutraliza o vetor — binding de parâmetro separado da string SQL, lista de argumentos passada sem shell, remoção de separadores de caminho, allowlist, hash com salt — então NÃO é uma vulnerabilidade, por mais que o padrão pareça arriscado à primeira vista.
+- Não reporte risco meramente potencial como "vulnerability".
+- "cwe" é obrigatório quando "finding_type" é "vulnerability"; quando for "hardening", omita o campo.
 - "evidence" deve citar o trecho exato do código exibido, não invente.
 - "fix_code" deve conter APENAS o código de substituição (sem o prefixo "<número>: " das anotações), preservando a indentação original, pronto para substituir exatamente as linhas indicadas. Use quando conseguir dar uma correção concreta; se a correção exigir contexto que você não tem, omita "fix_code" e descreva em "fix".
 - Para uma correção que abrange várias linhas, defina "fix_start_line" como a primeira linha substituída e "line" como a última; ambas devem ser linhas anotadas contíguas.
@@ -73,6 +78,7 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
       "path": "<caminho do arquivo exatamente como recebido>",
       "line": <número inteiro da linha, vindo das anotações>,
       "vulnerability": "<título curto do tipo do problema, ex.: SQL Injection>",
+      "finding_type": "vulnerability" | "hardening",
       "severity": "critical" | "high" | "medium" | "low",
       "confidence": <número de 0 a 1 indicando sua confiança no achado>,
       "explanation": "<explicação concisa do porquê isto é um problema>",
@@ -88,7 +94,11 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
 Regras:
 - "line" deve ser um dos números de linha anotados daquele arquivo. Nunca invente números de linha.
 - "confidence" é um número entre 0 e 1 (ex.: 0.91). Seja honesto: baixa confiança para suspeitas, alta para problemas claros.
-- "cwe" só quando houver um CWE pertinente; caso contrário, omita o campo.
+- "finding_type" é "vulnerability" APENAS quando o código exibido apresenta evidência concreta da falha: você consegue descrever um valor de entrada que, dado exatamente este código, produz o efeito malicioso. Caso contrário, use "hardening".
+- Use "hardening" quando o problema for condicional ("pode", "caso não seja validado"), quando depender de código que não foi exibido, ou quando for recomendação preventiva sobre código que já aplica a mitigação padrão.
+- Se o trecho exibido já contém a barreira que neutraliza o vetor — binding de parâmetro separado da string SQL, lista de argumentos passada sem shell, remoção de separadores de caminho, allowlist, hash com salt — então NÃO é uma vulnerabilidade, por mais que o padrão pareça arriscado à primeira vista.
+- Não reporte risco meramente potencial como "vulnerability".
+- "cwe" é obrigatório quando "finding_type" é "vulnerability"; quando for "hardening", omita o campo.
 - "evidence" deve citar o trecho exato do código exibido, não invente.
 - "fix_code" deve conter APENAS o código de substituição (sem o prefixo "<número>: " das anotações), preservando a indentação original, pronto para substituir exatamente as linhas indicadas. Use quando conseguir dar uma correção concreta; se a correção exigir contexto que você não tem, omita "fix_code" e descreva em "fix".
 - Para uma correção que abrange várias linhas, defina "fix_start_line" como a primeira linha substituída e "line" como a última; ambas devem ser linhas anotadas contíguas.

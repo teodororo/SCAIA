@@ -64,6 +64,10 @@ inputs:
     description: "Número máximo de re-tentativas em respostas 429 (rate limit) ou 5xx da IA."
     required: false
     default: "5"
+  min-confidence:
+    description: "Confiança mínima (0-1) para um achado ser publicado, aplicada após a verificação."
+    required: false
+    default: "0.8"
 
 outputs:
   findings-count:

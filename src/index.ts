@@ -37,6 +37,7 @@ async function run(): Promise<void> {
   const failOnFindings = core.getInput("fail-on-findings") === "true";
   const maxRetries = Number.parseInt(core.getInput("max-retries") || "5", 10);
   const temperature = parseTemperature(core.getInput("temperature"));
+  const minConfidence = parseMinConfidence(core.getInput("min-confidence"));
 
   if (mode !== "pr" && mode !== "full") {
     core.setFailed(`Modo inválido: "${mode}". Use "pr" ou "full".`);
@@ -54,6 +55,7 @@ async function run(): Promise<void> {
       failOnFindings,
       maxRetries,
       temperature,
+      minConfidence,
     });
     return;
   }
@@ -69,6 +71,7 @@ async function run(): Promise<void> {
     failOnFindings,
     maxRetries,
     temperature,
+    minConfidence,
   });
 }
 
@@ -86,6 +89,20 @@ function parseTemperature(raw: string): number | undefined {
   return value;
 }
 
+/**
+ * Faz o parse do input `min-confidence`. Vazio usa o default 0.8. Rejeita
+ * valores fora da faixa 0-1.
+ */
+function parseMinConfidence(raw: string): number {
+  const trimmed = raw.trim();
+  if (trimmed === "") return 0.8;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`min-confidence inválido: "${raw}". Use um número entre 0 e 1.`);
+  }
+  return value;
+}
+
 interface CommonOpts {
   apiToken: string;
   baseUrl: string;
@@ -97,6 +114,43 @@ interface CommonOpts {
   maxRetries: number;
   /** Temperatura de amostragem; undefined = usa o default do modelo. */
   temperature?: number;
+  /** Confiança mínima (0-1) para um achado sobreviver ao filtro final. */
+  minConfidence: number;
+}
+
+/** Descarta os achados cuja confiança reportada fica abaixo do mínimo configurado. */
+function filterByConfidence(
+  candidates: ReviewResult["findings"],
+  minConfidence: number
+): ReviewResult["findings"] {
+  return candidates.filter((f) => f.confidence >= minConfidence);
+}
+
+/**
+ * Separa vulnerabilidades de recomendações preventivas. Só as vulnerabilidades
+ * são publicadas como achados de segurança; o hardening é preservado, mas fica
+ * restrito a uma linha no resumo — sem comentário inline e sem commit suggestion.
+ */
+function splitByFindingType(findings: ReviewResult["findings"]): {
+  vulnerabilities: ReviewResult["findings"];
+  hardening: ReviewResult["findings"];
+} {
+  return {
+    vulnerabilities: findings.filter((f) => f.findingType === "vulnerability"),
+    hardening: findings.filter((f) => f.findingType === "hardening"),
+  };
+}
+
+/** Acrescenta ao resumo a lista de recomendações preventivas, quando houver. */
+function appendHardeningToSummary(
+  summary: string,
+  hardening: ReviewResult["findings"]
+): string {
+  if (hardening.length === 0) return summary;
+  const itens = hardening
+    .map((f) => `${f.vulnerability} (\`${f.path}:${f.line}\`)`)
+    .join("; ");
+  return `${summary}\n\n**Recomendações preventivas** (não classificadas como vulnerabilidade): ${itens}`;
 }
 
 /** Loga uma re-tentativa da chamada à IA no log da action. */
@@ -154,8 +208,17 @@ async function runPrReview(
     onRetry: logRetry,
   });
   const result = await client.review(buildUserPrompt(renderDiff(annotated)));
+  core.info(`A IA retornou ${result.findings.length} achado(s) candidato(s).`);
 
-  core.info(`A IA retornou ${result.findings.length} achado(s).`);
+  const { vulnerabilities, hardening } = splitByFindingType(
+    filterByConfidence(result.findings, opts.minConfidence)
+  );
+  core.info(
+    `${vulnerabilities.length} vulnerabilidade(s) e ${hardening.length} recomendação(ões) ` +
+      `de hardening após o filtro de confiança mínima.`
+  );
+  result.findings = vulnerabilities;
+  result.summary = appendHardeningToSummary(result.summary, hardening);
   core.setOutput("findings-count", String(result.findings.length));
 
   const headSha = await getHeadSha(octokit, ctx);
@@ -222,13 +285,21 @@ async function runFullScan(opts: CommonOpts): Promise<void> {
 
   const merged: ReviewResult = { summary: "", findings: [] };
   const summaries: string[] = [];
+  const hardening: ReviewResult["findings"] = [];
   for (let i = 0; i < batches.length; i++) {
     core.info(`Revisando lote ${i + 1}/${batches.length}...`);
     const result = await client.review(buildFullUserPrompt(renderDiff(batches[i])));
-    merged.findings.push(...result.findings);
+    const split = splitByFindingType(
+      filterByConfidence(result.findings, opts.minConfidence)
+    );
+    merged.findings.push(...split.vulnerabilities);
+    hardening.push(...split.hardening);
     if (result.summary) summaries.push(result.summary);
   }
-  merged.summary = summaries.join(" ");
+  merged.summary = appendHardeningToSummary(summaries.join(" "), hardening);
+  if (hardening.length > 0) {
+    core.info(`${hardening.length} recomendação(ões) de hardening fora do relatório de segurança.`);
+  }
 
   core.info(`A IA retornou ${merged.findings.length} achado(s).`);
   core.setOutput("findings-count", String(merged.findings.length));

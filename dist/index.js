@@ -30050,6 +30050,7 @@ function parseReview(content) {
             path,
             line,
             severity: normalizeSeverity(f.severity),
+            findingType: normalizeFindingType(f.finding_type),
             vulnerability: str(f.vulnerability) || str(f.title) || "Problema",
             confidence: normalizeConfidence(f.confidence),
             explanation,
@@ -30092,6 +30093,14 @@ function normalizeCwe(value) {
         return undefined;
     const m = /(\d+)/.exec(s);
     return m ? `CWE-${m[1]}` : s;
+}
+/**
+ * Normaliza `finding_type`. O default é "vulnerability" de propósito: um modelo
+ * que ignore o campo mantém o comportamento anterior, de modo que a introdução
+ * do contrato nunca esconda um achado por omissão.
+ */
+function normalizeFindingType(value) {
+    return str(value).toLowerCase() === "hardening" ? "hardening" : "vulnerability";
 }
 function normalizeSeverity(value) {
     const s = String(value).toLowerCase();
@@ -30484,6 +30493,7 @@ async function run() {
     const failOnFindings = core.getInput("fail-on-findings") === "true";
     const maxRetries = Number.parseInt(core.getInput("max-retries") || "5", 10);
     const temperature = parseTemperature(core.getInput("temperature"));
+    const minConfidence = parseMinConfidence(core.getInput("min-confidence"));
     if (mode !== "pr" && mode !== "full") {
         core.setFailed(`Modo inválido: "${mode}". Use "pr" ou "full".`);
         return;
@@ -30499,6 +30509,7 @@ async function run() {
             failOnFindings,
             maxRetries,
             temperature,
+            minConfidence,
         });
         return;
     }
@@ -30513,6 +30524,7 @@ async function run() {
         failOnFindings,
         maxRetries,
         temperature,
+        minConfidence,
     });
 }
 /**
@@ -30528,6 +30540,44 @@ function parseTemperature(raw) {
         throw new Error(`Temperatura inválida: "${raw}". Use um número entre 0 e 2, ou deixe vazio.`);
     }
     return value;
+}
+/**
+ * Faz o parse do input `min-confidence`. Vazio usa o default 0.8. Rejeita
+ * valores fora da faixa 0-1.
+ */
+function parseMinConfidence(raw) {
+    const trimmed = raw.trim();
+    if (trimmed === "")
+        return 0.8;
+    const value = Number(trimmed);
+    if (!Number.isFinite(value) || value < 0 || value > 1) {
+        throw new Error(`min-confidence inválido: "${raw}". Use um número entre 0 e 1.`);
+    }
+    return value;
+}
+/** Descarta os achados cuja confiança reportada fica abaixo do mínimo configurado. */
+function filterByConfidence(candidates, minConfidence) {
+    return candidates.filter((f) => f.confidence >= minConfidence);
+}
+/**
+ * Separa vulnerabilidades de recomendações preventivas. Só as vulnerabilidades
+ * são publicadas como achados de segurança; o hardening é preservado, mas fica
+ * restrito a uma linha no resumo — sem comentário inline e sem commit suggestion.
+ */
+function splitByFindingType(findings) {
+    return {
+        vulnerabilities: findings.filter((f) => f.findingType === "vulnerability"),
+        hardening: findings.filter((f) => f.findingType === "hardening"),
+    };
+}
+/** Acrescenta ao resumo a lista de recomendações preventivas, quando houver. */
+function appendHardeningToSummary(summary, hardening) {
+    if (hardening.length === 0)
+        return summary;
+    const itens = hardening
+        .map((f) => `${f.vulnerability} (\`${f.path}:${f.line}\`)`)
+        .join("; ");
+    return `${summary}\n\n**Recomendações preventivas** (não classificadas como vulnerabilidade): ${itens}`;
 }
 /** Loga uma re-tentativa da chamada à IA no log da action. */
 function logRetry(attempt, status, waitMs) {
@@ -30571,7 +30621,12 @@ async function runPrReview(opts) {
         onRetry: logRetry,
     });
     const result = await client.review((0, prompt_1.buildUserPrompt)((0, diff_1.renderDiff)(annotated)));
-    core.info(`A IA retornou ${result.findings.length} achado(s).`);
+    core.info(`A IA retornou ${result.findings.length} achado(s) candidato(s).`);
+    const { vulnerabilities, hardening } = splitByFindingType(filterByConfidence(result.findings, opts.minConfidence));
+    core.info(`${vulnerabilities.length} vulnerabilidade(s) e ${hardening.length} recomendação(ões) ` +
+        `de hardening após o filtro de confiança mínima.`);
+    result.findings = vulnerabilities;
+    result.summary = appendHardeningToSummary(result.summary, hardening);
     core.setOutput("findings-count", String(result.findings.length));
     const headSha = await (0, github_1.getHeadSha)(octokit, ctx);
     await (0, github_1.postReview)(octokit, ctx, headSha, result, validLinesByFile);
@@ -30622,14 +30677,20 @@ async function runFullScan(opts) {
     });
     const merged = { summary: "", findings: [] };
     const summaries = [];
+    const hardening = [];
     for (let i = 0; i < batches.length; i++) {
         core.info(`Revisando lote ${i + 1}/${batches.length}...`);
         const result = await client.review((0, prompt_1.buildFullUserPrompt)((0, diff_1.renderDiff)(batches[i])));
-        merged.findings.push(...result.findings);
+        const split = splitByFindingType(filterByConfidence(result.findings, opts.minConfidence));
+        merged.findings.push(...split.vulnerabilities);
+        hardening.push(...split.hardening);
         if (result.summary)
             summaries.push(result.summary);
     }
-    merged.summary = summaries.join(" ");
+    merged.summary = appendHardeningToSummary(summaries.join(" "), hardening);
+    if (hardening.length > 0) {
+        core.info(`${hardening.length} recomendação(ões) de hardening fora do relatório de segurança.`);
+    }
     core.info(`A IA retornou ${merged.findings.length} achado(s).`);
     core.setOutput("findings-count", String(merged.findings.length));
     await (0, report_1.reportScanResults)(merged, reportPath);
@@ -30679,6 +30740,7 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
       "path": "<caminho do arquivo exatamente como recebido>",
       "line": <número inteiro da linha, vindo das anotações do lado NOVO>,
       "vulnerability": "<título curto do tipo do problema, ex.: SQL Injection>",
+      "finding_type": "vulnerability" | "hardening",
       "severity": "critical" | "high" | "medium" | "low",
       "confidence": <número de 0 a 1 indicando sua confiança no achado>,
       "explanation": "<explicação concisa do porquê isto é um problema>",
@@ -30694,7 +30756,11 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
 Regras:
 - "line" deve ser um dos números de linha anotados daquele arquivo. Nunca invente números de linha.
 - "confidence" é um número entre 0 e 1 (ex.: 0.91). Seja honesto: baixa confiança para suspeitas, alta para problemas claros.
-- "cwe" só quando houver um CWE pertinente; caso contrário, omita o campo.
+- "finding_type" é "vulnerability" APENAS quando o código exibido apresenta evidência concreta da falha: você consegue descrever um valor de entrada que, dado exatamente este código, produz o efeito malicioso. Caso contrário, use "hardening".
+- Use "hardening" quando o problema for condicional ("pode", "caso não seja validado"), quando depender de código que não foi exibido, ou quando for recomendação preventiva sobre código que já aplica a mitigação padrão.
+- Se o trecho exibido já contém a barreira que neutraliza o vetor — binding de parâmetro separado da string SQL, lista de argumentos passada sem shell, remoção de separadores de caminho, allowlist, hash com salt — então NÃO é uma vulnerabilidade, por mais que o padrão pareça arriscado à primeira vista.
+- Não reporte risco meramente potencial como "vulnerability".
+- "cwe" é obrigatório quando "finding_type" é "vulnerability"; quando for "hardening", omita o campo.
 - "evidence" deve citar o trecho exato do código exibido, não invente.
 - "fix_code" deve conter APENAS o código de substituição (sem o prefixo "<número>: " das anotações), preservando a indentação original, pronto para substituir exatamente as linhas indicadas. Use quando conseguir dar uma correção concreta; se a correção exigir contexto que você não tem, omita "fix_code" e descreva em "fix".
 - Para uma correção que abrange várias linhas, defina "fix_start_line" como a primeira linha substituída e "line" como a última; ambas devem ser linhas anotadas contíguas.
@@ -30728,6 +30794,7 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
       "path": "<caminho do arquivo exatamente como recebido>",
       "line": <número inteiro da linha, vindo das anotações>,
       "vulnerability": "<título curto do tipo do problema, ex.: SQL Injection>",
+      "finding_type": "vulnerability" | "hardening",
       "severity": "critical" | "high" | "medium" | "low",
       "confidence": <número de 0 a 1 indicando sua confiança no achado>,
       "explanation": "<explicação concisa do porquê isto é um problema>",
@@ -30743,7 +30810,11 @@ sem texto fora do JSON). O objeto tem exatamente este formato:
 Regras:
 - "line" deve ser um dos números de linha anotados daquele arquivo. Nunca invente números de linha.
 - "confidence" é um número entre 0 e 1 (ex.: 0.91). Seja honesto: baixa confiança para suspeitas, alta para problemas claros.
-- "cwe" só quando houver um CWE pertinente; caso contrário, omita o campo.
+- "finding_type" é "vulnerability" APENAS quando o código exibido apresenta evidência concreta da falha: você consegue descrever um valor de entrada que, dado exatamente este código, produz o efeito malicioso. Caso contrário, use "hardening".
+- Use "hardening" quando o problema for condicional ("pode", "caso não seja validado"), quando depender de código que não foi exibido, ou quando for recomendação preventiva sobre código que já aplica a mitigação padrão.
+- Se o trecho exibido já contém a barreira que neutraliza o vetor — binding de parâmetro separado da string SQL, lista de argumentos passada sem shell, remoção de separadores de caminho, allowlist, hash com salt — então NÃO é uma vulnerabilidade, por mais que o padrão pareça arriscado à primeira vista.
+- Não reporte risco meramente potencial como "vulnerability".
+- "cwe" é obrigatório quando "finding_type" é "vulnerability"; quando for "hardening", omita o campo.
 - "evidence" deve citar o trecho exato do código exibido, não invente.
 - "fix_code" deve conter APENAS o código de substituição (sem o prefixo "<número>: " das anotações), preservando a indentação original, pronto para substituir exatamente as linhas indicadas. Use quando conseguir dar uma correção concreta; se a correção exigir contexto que você não tem, omita "fix_code" e descreva em "fix".
 - Para uma correção que abrange várias linhas, defina "fix_start_line" como a primeira linha substituída e "line" como a última; ambas devem ser linhas anotadas contíguas.
