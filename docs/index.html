@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SCAIA</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%20100%20100%27%3E%3Ctext%20y%3D%27.9em%27%20font-size%3D%2790%27%3E%F0%9F%90%B8%3C%2Ftext%3E%3C%2Fsvg%3E" />
-  <meta name="description" content="GitHub Action que revisa pull requests com IA. Traga seu token, aponte para qualquer endpoint OpenAI-compatível." />
+  <meta name="description" content="GitHub Action que revisa código com IA: modo pr (comentários inline no pull request) e modo full (scan do repositório inteiro com relatório). Traga seu token, aponte para qualquer endpoint OpenAI-compatível." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -162,7 +162,7 @@
     .hero-sub {
       color: var(--text-muted);
       font-size: 1.15rem;
-      max-width: 540px;
+      max-width: 560px;
       margin: 0 auto 2.25rem;
       line-height: 1.7;
     }
@@ -188,7 +188,7 @@
       background: var(--bg-overlay);
       border: 1px solid var(--border);
       border-bottom: none;
-      border-radius: 8px 8px 0 0;
+      border-radius: 0 8px 0 0;
       padding: .6rem 1rem;
       display: flex; align-items: center; gap: .5rem;
       font-family: 'IBM Plex Mono', monospace; font-size: .8rem; color: var(--text-muted);
@@ -224,19 +224,52 @@
       margin: 0; padding: .65rem 1rem;
     }
     [data-theme="light"] .ai-comment { background: rgba(124,58,237,.07); }
-    .ai-comment-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .3rem; }
+    .ai-comment-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .3rem; flex-wrap: wrap; }
     .ai-avatar { width: 18px; height: 18px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 9px; color: white; font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
     .ai-label { font-size: .75rem; color: var(--accent-glow); font-weight: 600; letter-spacing: .04em; font-family: 'IBM Plex Mono', monospace; }
     .severity-badge { font-size: .68rem; padding: .1rem .45rem; border-radius: 3px; font-weight: 600; letter-spacing: .04em; font-family: 'IBM Plex Mono', monospace; }
     .sev-warn { background: rgba(210,153,34,.18); color: var(--yellow); }
     .sev-error { background: rgba(248,81,73,.18); color: var(--red); }
     .ai-comment p { font-size: .84rem; color: var(--text-muted); line-height: 1.55; }
+    .ai-meta { font-size: .7rem; color: var(--text-dim); font-family: 'IBM Plex Mono', monospace; }
+
+    /* ── Relatório (modo full) ── */
+    .report-body { padding: 1.25rem 1.35rem; font-family: 'IBM Plex Sans', sans-serif; }
+    .report-title { font-size: 1.05rem; font-weight: 600; margin-bottom: .35rem; }
+    .report-sub { font-size: .86rem; color: var(--text-muted); line-height: 1.55; }
+    .report-counts { font-size: .8rem; font-family: 'IBM Plex Mono', monospace; color: var(--text-muted); margin: .9rem 0 .25rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border-subtle); }
+    .report-counts strong { color: var(--text); }
+    .report-group { font-size: .8rem; font-weight: 600; font-family: 'IBM Plex Mono', monospace; color: var(--text-muted); letter-spacing: .04em; margin: 1.1rem 0 .5rem; }
+    .report-finding { border: 1px solid var(--border-subtle); border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; padding: .7rem .9rem; margin-bottom: .6rem; background: var(--bg-overlay); }
+    .rf-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .25rem; }
+    .rf-name { font-size: .88rem; font-weight: 600; }
+    .rf-loc { font-family: 'IBM Plex Mono', monospace; font-size: .76rem; color: var(--blue); }
+    .rf-text { font-size: .84rem; color: var(--text-muted); line-height: 1.55; }
+    .rf-fix { font-size: .84rem; color: var(--text-muted); margin-top: .35rem; }
+    .rf-fix strong { color: var(--text); }
+    .report-empty { font-size: .84rem; color: var(--text-muted); }
 
     /* ── Sections ── */
     .section { padding: 3.5rem 0; border-top: 1px solid var(--border-subtle); }
     .section-label { font-family: 'IBM Plex Mono', monospace; font-size: .9rem; color: var(--accent-glow); letter-spacing: .1em; text-transform: uppercase; margin-bottom: .75rem; font-weight: 600;}
     h2 { font-size: 1.7rem; font-weight: 600; line-height: 1.2; margin-bottom: .75rem; letter-spacing: -.02em; }
     h2 .dim { color: var(--text-muted); }
+    .section-intro { color: var(--text-muted); font-size: .95rem; max-width: 640px; }
+
+    /* ── Modos ── */
+    .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-top: 2rem; }
+    .mode-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.35rem; }
+    .mode-card.is-default { border-color: var(--accent); }
+    .mode-head { display: flex; align-items: center; gap: .6rem; margin-bottom: .6rem; flex-wrap: wrap; }
+    .mode-key { font-family: 'IBM Plex Mono', monospace; font-size: .9rem; font-weight: 600; color: var(--accent-glow); background: rgba(22,163,74,.18); border: 1px solid var(--accent-dim); border-radius: 4px; padding: .1rem .5rem; }
+    [data-theme="light"] .mode-key { background: var(--accent-dim); }
+    .mode-tag { font-size: .68rem; font-family: 'IBM Plex Mono', monospace; color: var(--text-muted); background: var(--bg-overlay); border-radius: 3px; padding: .1rem .45rem; letter-spacing: .04em; }
+    .mode-card h3 { font-size: 1rem; font-weight: 600; margin-bottom: .35rem; }
+    .mode-card p { font-size: .88rem; color: var(--text-muted); line-height: 1.55; }
+    .mode-facts { list-style: none; margin-top: .9rem; display: grid; gap: .35rem; }
+    .mode-facts li { font-size: .82rem; color: var(--text-muted); display: flex; gap: .5rem; align-items: flex-start; line-height: 1.5; }
+    .mode-facts li::before { content: '→'; color: var(--accent-glow); flex-shrink: 0; }
+    .mode-facts code { font-family: 'IBM Plex Mono', monospace; font-size: .78rem; color: var(--blue); }
 
     /* ── Steps ── */
     .steps { display: grid; gap: 1px; background: var(--border-subtle); border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden; margin-top: 2rem; }
@@ -247,7 +280,7 @@
     .step p { font-size: .9rem; color: var(--text-muted); line-height: 1.55; }
 
     /* ── Code block ── */
-    .code-block { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; overflow: auto; font-family: 'IBM Plex Mono', monospace; font-size: .85rem; line-height: 1.75; }
+    .code-block { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 0 8px 8px 8px; overflow: auto; font-family: 'IBM Plex Mono', monospace; font-size: .85rem; line-height: 1.75; }
     .code-block-header { background: var(--bg-overlay); border-bottom: 1px solid var(--border); padding: .5rem 1rem; display: flex; align-items: center; justify-content: space-between; }
     .code-block-title { font-size: .78rem; color: var(--text-muted); font-family: 'IBM Plex Mono', monospace; }
     .copy-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: 4px; padding: .2rem .65rem; font-size: .75rem; cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; transition: color .15s, border-color .15s; }
@@ -258,22 +291,26 @@
     .code-block .cm { color: var(--text-dim); }
     .code-block .key { color: var(--code-key); }
     .code-block .op { color: var(--text-muted); }
+    .code-note { font-size: .85rem; color: var(--text-muted); margin-top: .85rem; }
+    .code-note code { font-family: 'IBM Plex Mono', monospace; font-size: .8rem; color: var(--blue); }
 
     /* ── Tabs ── */
-    .tabs { display: flex; gap: .25rem; margin-bottom: -1px; position: relative; z-index: 1; }
+    .tabs { display: flex; gap: .25rem; margin-bottom: -1px; position: relative; z-index: 1; flex-wrap: wrap; }
     .tab { font-size: .84rem; padding: .5rem 1rem; cursor: pointer; border-radius: 6px 6px 0 0; border: 1px solid transparent; color: var(--text-muted); background: none; font-family: 'IBM Plex Sans', sans-serif; transition: color .15s; border-bottom: none; }
     .tab.active { background: var(--bg-surface); border-color: var(--border); color: var(--text); }
     .tab:not(.active):hover { color: var(--text); }
+    .tab code { font-family: 'IBM Plex Mono', monospace; font-size: .82rem; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
 
     /* ── Inputs table ── */
+    .table-scroll { overflow-x: auto; }
     .inputs-table { width: 100%; border-collapse: collapse; margin-top: 1.5rem; font-size: .9rem; }
-    .inputs-table th { text-align: left; font-size: .75rem; font-weight: 600; color: var(--text-muted); letter-spacing: .06em; text-transform: uppercase; padding: .5rem .75rem; border-bottom: 1px solid var(--border); font-family: 'IBM Plex Sans', sans-serif; }
+    .inputs-table th { text-align: left; font-size: .75rem; font-weight: 600; color: var(--text-muted); letter-spacing: .06em; text-transform: uppercase; padding: .5rem .75rem; border-bottom: 1px solid var(--border); font-family: 'IBM Plex Sans', sans-serif; white-space: nowrap; }
     .inputs-table td { padding: .7rem .75rem; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
     .inputs-table tr:last-child td { border-bottom: none; }
     .inputs-table code { font-family: 'IBM Plex Mono', monospace; font-size: .82rem; background: var(--bg-overlay); padding: .1rem .35rem; border-radius: 3px; color: var(--blue); }
-    .badge { font-size: .72rem; padding: .15rem .5rem; border-radius: 3px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
+    .badge { font-size: .72rem; padding: .15rem .5rem; border-radius: 3px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; white-space: nowrap; }
     .badge-req { background: rgba(248,81,73,.13); color: var(--red); }
     [data-theme="light"] .badge-req { background: rgba(207,34,46,.1); }
     .badge-opt { background: var(--bg-overlay); color: var(--text-muted); }
@@ -334,6 +371,7 @@
   <div class="wrap">
     <a class="nav-brand" href="#"><span>SCAIA</span></a>
     <div class="nav-links">
+      <a href="#modos">Modos</a>
       <a href="#como-funciona">Como funciona</a>
       <a href="#uso">Uso</a>
       <a href="#inputs">Inputs</a>
@@ -351,8 +389,8 @@
 <section class="hero">
   <div class="wrap">
     <div class="hero-badge">GitHub Action</div>
-    <h1>Revisão de código<br /><em>por IA em cada PR</em></h1>
-    <p class="hero-sub">Uma GitHub Action reutilizável que lê os diffs do seu pull request e posta comentários inline com os achados. Traga seu próprio token — funciona com qualquer endpoint OpenAI-compatível.</p>
+    <h1>Revisão de código<br /><em>por IA, de ponta a ponta</em></h1>
+    <p class="hero-sub">Uma GitHub Action que analisa desde pull requests até repositórios inteiros, identificando vulnerabilidades e sugerindo correções. Sem servidores intermediários: traga seu próprio token e use qualquer endpoint compatível com a API OpenAI.</p>
     <div class="hero-actions">
       <a class="btn-primary btn-lg" href="#uso">Começar agora</a>
       <a class="btn-ghost btn-lg" href="https://github.com/teodororo/SCAIA" target="_blank" rel="noopener">
@@ -366,95 +404,161 @@
 <!-- DEMO -->
 <section class="demo-wrap">
   <div class="wrap">
-    <div class="demo-file-header">
-      <div class="demo-file-dot" style="background:#f85149"></div>
-      <div class="demo-file-dot" style="background:#d29922"></div>
-      <div class="demo-file-dot" style="background:#3fb950"></div>
-      <span style="margin-left:.5rem">src/auth/token.ts</span>
-      <span style="margin-left:auto;color:var(--text-dim)">diff</span>
-    </div>
-    <div class="demo-body">
-      <div class="diff-line"><span class="ln">12</span><span class="code-content" style="color:var(--text-muted)">export function createToken(userId: string) {</span></div>
-      <div class="diff-line remove"><span class="ln">13</span><span class="code-content">  const secret = process.env.JWT_SECRET;</span></div>
-      <div class="diff-line add"><span class="ln">13</span><span class="code-content">  const secret = process.env.JWT_SECRET ?? 'dev-fallback';</span></div>
-      <div class="diff-line finding"><span class="ln">14</span><span class="code-content">  return jwt.sign({ id: userId }, secret, { expiresIn: '30d' });</span></div>
-      <div class="ai-comment">
-        <div class="ai-comment-header">
-          <div class="ai-avatar">AI</div>
-          <span class="ai-label">SCAIA</span>
-          <span class="severity-badge sev-error">erro</span>
-        </div>
-        <p>O fallback <code style="font-size:.78rem;font-family:'IBM Plex Mono',monospace">'dev-fallback'</code> como secret de JWT pode vazar para produção. Remova o operador <code style="font-size:.78rem;font-family:'IBM Plex Mono',monospace">??</code> e lance um erro explícito quando a variável não estiver definida.</p>
+    <div class="tab-group">
+      <div class="tabs">
+        <button class="tab active" onclick="showTab('demo-pr', event)">Modo <code>pr</code> - comentários inline</button>
+        <button class="tab" onclick="showTab('demo-full', event)">Modo <code>full</code> - relatório</button>
       </div>
-      <div class="diff-line"><span class="ln">15</span><span class="code-content" style="color:var(--text-muted)">}</span></div>
-      <div class="diff-line add finding"><span class="ln">18</span><span class="code-content">  const token = req.headers['authorization'];</span></div>
-      <div class="diff-line"><span class="ln">19</span><span class="code-content" style="color:var(--text-muted)">  // ...</span></div>
+
+      <!-- Demo: modo pr -->
+      <div id="tab-demo-pr" class="tab-content active">
+        <div class="demo-file-header">
+          <div class="demo-file-dot" style="background:#f85149"></div>
+          <div class="demo-file-dot" style="background:#d29922"></div>
+          <div class="demo-file-dot" style="background:#3fb950"></div>
+          <span style="margin-left:.5rem">src/auth/token.ts</span>
+          <span style="margin-left:auto;color:var(--text-dim)">diff do pull request</span>
+        </div>
+        <div class="demo-body">
+          <div class="diff-line"><span class="ln">12</span><span class="code-content" style="color:var(--text-muted)">export function createToken(userId: string) {</span></div>
+          <div class="diff-line remove"><span class="ln">13</span><span class="code-content">  const secret = process.env.JWT_SECRET;</span></div>
+          <div class="diff-line add"><span class="ln">13</span><span class="code-content">  const secret = process.env.JWT_SECRET ?? 'dev-fallback';</span></div>
+          <div class="diff-line finding"><span class="ln">14</span><span class="code-content">  return jwt.sign({ id: userId }, secret, { expiresIn: '30d' });</span></div>
+          <div class="ai-comment">
+            <div class="ai-comment-header">
+              <div class="ai-avatar">AI</div>
+              <span class="ai-label">SCAIA</span>
+              <span class="severity-badge sev-error">🔴 crítico</span>
+              <span class="ai-meta">confiança 94% · CWE-798</span>
+            </div>
+            <p>O fallback <code style="font-size:.78rem;font-family:'IBM Plex Mono',monospace">'dev-fallback'</code> como secret de JWT pode vazar para produção. Remova o operador <code style="font-size:.78rem;font-family:'IBM Plex Mono',monospace">??</code> e lance um erro explícito quando a variável não estiver definida.</p>
+            </div>
+        </div>
+      </div>
+
+      <!-- Demo: modo full -->
+      <div id="tab-demo-full" class="tab-content">
+        <div class="demo-file-header">
+          <div class="demo-file-dot" style="background:#f85149"></div>
+          <div class="demo-file-dot" style="background:#d29922"></div>
+          <div class="demo-file-dot" style="background:#3fb950"></div>
+          <span style="margin-left:.5rem">scaia-report.md</span>
+          <span style="margin-left:auto;color:var(--text-dim)">artifact + job summary</span>
+        </div>
+        <div class="demo-body">
+          <div class="report-body">
+            <div class="report-title">🤖 Revisão do SCAIA</div>
+            <p class="report-sub">Varredura de 214 arquivos versionados em 3 lotes. A maior parte dos problemas se concentra na camada de autenticação e no tratamento de entrada das rotas administrativas.</p>
+            <div class="report-counts"><strong>Total de achados: 3</strong> (🔴 Crítico: 1 · 🟠 Alto: 1 · 🟡 Médio: 1 · 🔵 Baixo: 0)</div>
+
+            <div class="report-group">🔴 Crítico (1)</div>
+            <div class="report-finding">
+              <div class="rf-head">
+                <span class="rf-name">Segredo embutido no código</span>
+                <span class="severity-badge sev-error">confiança 94%</span>
+                <span class="rf-loc">src/auth/token.ts:13</span>
+              </div>
+              <p class="rf-text">O secret de JWT tem fallback literal <code style="font-family:'IBM Plex Mono',monospace;font-size:.78rem">'dev-fallback'</code>, que permite forjar tokens válidos se a variável de ambiente não estiver definida em produção. <code style="font-family:'IBM Plex Mono',monospace;font-size:.78rem">CWE-798</code></p>
+              <p class="rf-fix"><strong>Correção:</strong> falhe na inicialização quando <code style="font-family:'IBM Plex Mono',monospace;font-size:.78rem">JWT_SECRET</code> estiver ausente.</p>
+            </div>
+
+            <div class="report-group">🟠 Alto (1)</div>
+            <div class="report-finding">
+              <div class="rf-head">
+                <span class="rf-name">Injeção de SQL por concatenação</span>
+                <span class="severity-badge sev-warn">confiança 91%</span>
+                <span class="rf-loc">src/db/users.ts:42</span>
+              </div>
+              <p class="rf-text">O parâmetro <code style="font-family:'IBM Plex Mono',monospace;font-size:.78rem">req.query.email</code> é interpolado direto na query sem parametrização nem validação. <code style="font-family:'IBM Plex Mono',monospace;font-size:.78rem">CWE-89</code></p>
+              <p class="rf-fix"><strong>Correção:</strong> use query parametrizada (<code style="font-family:'IBM Plex Mono',monospace;font-size:.78rem">$1</code>) em vez de template string.</p>
+            </div>
+
+            <div class="report-group">🟡 Médio (1)</div>
+            <div class="report-finding">
+              <div class="rf-head">
+                <span class="rf-name">Path traversal no download de anexos</span>
+                <span class="severity-badge sev-warn">confiança 83%</span>
+                <span class="rf-loc">src/api/files.ts:77</span>
+              </div>
+              <p class="rf-text">O nome do arquivo vindo da rota é concatenado ao diretório de uploads sem normalização, permitindo <code style="font-family:'IBM Plex Mono',monospace;font-size:.78rem">../</code> para escapar do diretório. <code style="font-family:'IBM Plex Mono',monospace;font-size:.78rem">CWE-22</code></p>
+              <p class="rf-fix"><strong>Correção:</strong> resolva o caminho e verifique que ele continua dentro da pasta de uploads.</p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- COMO FUNCIONA -->
-<section class="section" id="como-funciona">
+<!-- MODOS -->
+<section class="section" id="modos">
   <div class="wrap">
-    <p class="section-label">Fluxo</p>
-    <h2>Como <span class="dim">funciona</span></h2>
-    <div class="steps">
-      <div class="step">
-        <span class="step-num">01</span>
-        <div>
-          <h3>Leitura do diff</h3>
-          <p>No evento <code style="font-family:'IBM Plex Mono',monospace;font-size:.84rem;color:var(--blue)">pull_request</code>, a action lista os arquivos alterados e extrai seus diffs, respeitando o limite configurado em <code style="font-family:'IBM Plex Mono',monospace;font-size:.84rem;color:var(--blue)">max-files</code>.</p>
+    <p class="section-label">Modos</p>
+    <h2>Uma action, <span class="dim">dois modos</span></h2>
+    <p class="section-intro">O input <code style="font-family:'IBM Plex Mono',monospace;font-size:.88rem;color:var(--blue)">mode</code> decide o que a action lê e para onde ela escreve os achados.</p>
+    <div class="modes">
+      <div class="mode-card is-default">
+        <div class="mode-head">
+          <span class="mode-key">mode: pr</span>
+          <span class="mode-tag">padrão</span>
         </div>
+        <h3>Revisão do pull request</h3>
+        <p>Lê o diff do PR e devolve os achados como comentários inline nos pontos vulneráveis.</p>
+        <ul class="mode-facts">
+          <li>Dispara em eventos <code>pull_request</code></li>
+          <li>Precisa de <code>pull-requests: write</code></li>
+          <li>Não exige <code>actions/checkout</code></li>
+          <li>Não tem acesso ao resto do código do repositório.</li>
+        </ul>
       </div>
-      <div class="step">
-        <span class="step-num">02</span>
-        <div>
-          <h3>Anotação de linhas</h3>
-          <p>Cada diff é anotado com os números de linha do lado novo (hunks do git) antes de ser enviado ao modelo, permitindo comentários inline precisos.</p>
+      <div class="mode-card">
+        <div class="mode-head">
+          <span class="mode-key">mode: full</span>
         </div>
-      </div>
-      <div class="step">
-        <span class="step-num">03</span>
-        <div>
-          <h3>Chamada ao modelo</h3>
-          <p>O diff anotado é enviado ao endpoint configurado — OpenAI, OpenRouter, Claude via proxy, ou qualquer modelo compatível com a API Chat Completions.</p>
-        </div>
-      </div>
-      <div class="step">
-        <span class="step-num">04</span>
-        <div>
-          <h3>Achados como comentários</h3>
-          <p>O modelo retorna JSON estruturado (caminho, linha, severidade, comentário). Cada achado vira um comentário inline no PR; os fora do alcance do diff são incorporados ao resumo.</p>
-        </div>
+        <h3>Scan do repositório inteiro</h3>
+        <p>Lê os arquivos versionados (<code style="font-family:'IBM Plex Mono',monospace;font-size:.82rem;color:var(--blue)">git ls-files</code>) em lotes e grava um relatório Markdown + Job Summary.</p>
+        <ul class="mode-facts">
+          <li>Roda em <code>push</code>, <code>schedule</code>, <code>workflow_dispatch</code></li>
+          <li>Basta <code>contents: read</code></li>
+          <li>Exige <code>actions/checkout</code></li>
+          <li>Saída em <code>report-path</code>, pronta para virar artifact</li>
+        </ul>
       </div>
     </div>
   </div>
 </section>
+
 
 <!-- USO -->
 <section class="section" id="uso">
   <div class="wrap">
     <p class="section-label">Integração</p>
     <h2>Adicione em <span class="dim">minutos</span></h2>
+    <p class="section-intro">Workflows completos e prontos para copiar em <code style="font-family:'IBM Plex Mono',monospace;font-size:.88rem;color:var(--blue)">.github/workflows/</code>. Só é preciso criar o secret com a chave do seu provedor de IA.</p>
 
-    <div class="tabs" style="margin-top:2rem">
-      <button class="tab active" onclick="showTab('openai', event)">OpenAI</button>
-      <button class="tab" onclick="showTab('openrouter', event)">OpenRouter</button>
-      <button class="tab" onclick="showTab('proxy', event)">Claude / Proxy</button>
-    </div>
+    <div class="tab-group">
+      <div class="tabs" style="margin-top:2rem">
+        <button class="tab active" onclick="showTab('pr', event)">Modo <code>pr</code></button>
+        <button class="tab" onclick="showTab('full', event)">Modo <code>full</code></button>
+        <button class="tab" onclick="showTab('ambos', event)">Os dois</button>
+      </div>
 
-    <div id="tab-openai" class="tab-content active">
-      <div class="code-block">
-        <div class="code-block-header">
-          <span class="code-block-title">.github/workflows/ai-review.yml</span>
-          <button class="copy-btn" onclick="copyCode('code-openai', event)">copiar</button>
-        </div>
-        <pre id="code-openai"><span class="key">name</span><span class="op">:</span> <span class="str">Revisão de Código por IA</span>
+      <div id="tab-pr" class="tab-content active">
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-title">.github/workflows/scaia-pr.yml</span>
+            <button class="copy-btn" onclick="copyCode('code-pr', event)">copiar</button>
+          </div>
+          <pre id="code-pr"><span class="cm"># Revisa o diff de cada pull request e comenta inline nos pontos vulneráveis.</span>
+<span class="key">name</span><span class="op">:</span> <span class="str">Revisão do SCAIA - modo PR</span>
+
 <span class="key">on</span><span class="op">:</span>
   <span class="key">pull_request</span><span class="op">:</span>
+
 <span class="key">permissions</span><span class="op">:</span>
   <span class="key">contents</span><span class="op">:</span> <span class="str">read</span>
   <span class="key">pull-requests</span><span class="op">:</span> <span class="str">write</span>
+
 <span class="key">jobs</span><span class="op">:</span>
   <span class="key">review</span><span class="op">:</span>
     <span class="key">runs-on</span><span class="op">:</span> <span class="str">ubuntu-latest</span>
@@ -463,36 +567,85 @@
         <span class="key">with</span><span class="op">:</span>
           <span class="key">api-token</span><span class="op">:</span> <span class="str">${{ secrets.AI_API_TOKEN }}</span>
           <span class="key">model</span><span class="op">:</span> <span class="str">gpt-4o</span></pre>
-      </div>
-    </div>
-
-    <div id="tab-openrouter" class="tab-content">
-      <div class="code-block">
-        <div class="code-block-header">
-          <span class="code-block-title">.github/workflows/ai-review.yml</span>
-          <button class="copy-btn" onclick="copyCode('code-openrouter', event)">copiar</button>
         </div>
-        <pre id="code-openrouter"><span class="op">-</span> <span class="key">uses</span><span class="op">:</span> <span class="str">teodororo/SCAIA@v1</span>
-  <span class="key">with</span><span class="op">:</span>
-    <span class="key">api-token</span><span class="op">:</span> <span class="str">${{ secrets.OPENROUTER_KEY }}</span>
-    <span class="key">api-base-url</span><span class="op">:</span> <span class="str">https://openrouter.ai/api/v1</span>
-    <span class="key">model</span><span class="op">:</span> <span class="str">anthropic/claude-3.5-sonnet</span></pre>
       </div>
-    </div>
 
-    <div id="tab-proxy" class="tab-content">
-      <div class="code-block">
-        <div class="code-block-header">
-          <span class="code-block-title">.github/workflows/ai-review.yml</span>
-          <button class="copy-btn" onclick="copyCode('code-proxy', event)">copiar</button>
+      <div id="tab-full" class="tab-content">
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-title">.github/workflows/scaia-full.yml</span>
+            <button class="copy-btn" onclick="copyCode('code-full', event)">copiar</button>
+          </div>
+          <pre id="code-full"><span class="cm"># Escaneia o repositório inteiro e publica o relatório ao fim da execução.</span>
+<span class="key">name</span><span class="op">:</span> <span class="str">Revisão do SCAIA - modo full</span>
+
+<span class="key">on</span><span class="op">:</span>
+  <span class="key">workflow_dispatch</span><span class="op">:</span>
+  <span class="key">schedule</span><span class="op">:</span>
+    <span class="op">-</span> <span class="key">cron</span><span class="op">:</span> <span class="str">"0 6 * * 1"</span> <span class="cm"># toda segunda às 06:00 UTC</span>
+
+<span class="key">permissions</span><span class="op">:</span>
+  <span class="key">contents</span><span class="op">:</span> <span class="str">read</span>
+
+<span class="key">jobs</span><span class="op">:</span>
+  <span class="key">scan</span><span class="op">:</span>
+    <span class="key">runs-on</span><span class="op">:</span> <span class="str">ubuntu-latest</span>
+    <span class="key">steps</span><span class="op">:</span>
+      <span class="op">-</span> <span class="key">uses</span><span class="op">:</span> <span class="str">actions/checkout@v4</span> <span class="cm"># obrigatório no modo full</span>
+
+      <span class="op">-</span> <span class="key">uses</span><span class="op">:</span> <span class="str">teodororo/SCAIA@v2</span>
+        <span class="key">with</span><span class="op">:</span>
+          <span class="key">mode</span><span class="op">:</span> <span class="str">full</span>
+          <span class="key">api-token</span><span class="op">:</span> <span class="str">${{ secrets.AI_API_TOKEN }}</span>
+          <span class="key">model</span><span class="op">:</span> <span class="str">gpt-4o</span></pre>
         </div>
-        <pre id="code-proxy"><span class="op">-</span> <span class="key">uses</span><span class="op">:</span> <span class="str">teodororo/SCAIA@v1</span>
-  <span class="key">with</span><span class="op">:</span>
-    <span class="key">api-token</span><span class="op">:</span> <span class="str">${{ secrets.MY_AI_KEY }}</span>
-    <span class="key">api-base-url</span><span class="op">:</span> <span class="str">https://meu-proxy.exemplo.com/v1</span>
-    <span class="key">model</span><span class="op">:</span> <span class="str">meu-modelo-local</span>
-    <span class="cm">    # Qualquer endpoint OpenAI-compatível funciona</span></pre>
+        <p class="code-note">O relatório é gravado no repositório clonado e aparece no resumo da execução, sem precisar de mais nada.</p>
       </div>
+
+      <div id="tab-ambos" class="tab-content">
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-title">.github/workflows/scaia.yml</span>
+            <button class="copy-btn" onclick="copyCode('code-ambos', event)">copiar</button>
+          </div>
+          <pre id="code-ambos"><span class="cm"># Um arquivo só: revisa cada pull request e escaneia o repositório toda semana.</span>
+<span class="key">name</span><span class="op">:</span> <span class="str">Revisão do SCAIA</span>
+
+<span class="key">on</span><span class="op">:</span>
+  <span class="key">pull_request</span><span class="op">:</span>
+  <span class="key">workflow_dispatch</span><span class="op">:</span>
+  <span class="key">schedule</span><span class="op">:</span>
+    <span class="op">-</span> <span class="key">cron</span><span class="op">:</span> <span class="str">"0 6 * * 1"</span> <span class="cm"># toda segunda às 06:00 UTC</span>
+
+<span class="key">jobs</span><span class="op">:</span>
+  <span class="key">pr</span><span class="op">:</span>
+    <span class="key">if</span><span class="op">:</span> <span class="str">github.event_name == 'pull_request'</span>
+    <span class="key">runs-on</span><span class="op">:</span> <span class="str">ubuntu-latest</span>
+    <span class="key">permissions</span><span class="op">:</span>
+      <span class="key">contents</span><span class="op">:</span> <span class="str">read</span>
+      <span class="key">pull-requests</span><span class="op">:</span> <span class="str">write</span>
+    <span class="key">steps</span><span class="op">:</span>
+      <span class="op">-</span> <span class="key">uses</span><span class="op">:</span> <span class="str">teodororo/SCAIA@v2</span>
+        <span class="key">with</span><span class="op">:</span>
+          <span class="key">api-token</span><span class="op">:</span> <span class="str">${{ secrets.AI_API_TOKEN }}</span>
+          <span class="key">model</span><span class="op">:</span> <span class="str">gpt-4o</span>
+
+  <span class="key">full</span><span class="op">:</span>
+    <span class="key">if</span><span class="op">:</span> <span class="str">github.event_name != 'pull_request'</span>
+    <span class="key">runs-on</span><span class="op">:</span> <span class="str">ubuntu-latest</span>
+    <span class="key">permissions</span><span class="op">:</span>
+      <span class="key">contents</span><span class="op">:</span> <span class="str">read</span>
+    <span class="key">steps</span><span class="op">:</span>
+      <span class="op">-</span> <span class="key">uses</span><span class="op">:</span> <span class="str">actions/checkout@v4</span>
+      <span class="op">-</span> <span class="key">uses</span><span class="op">:</span> <span class="str">teodororo/SCAIA@v2</span>
+        <span class="key">with</span><span class="op">:</span>
+          <span class="key">mode</span><span class="op">:</span> <span class="str">full</span>
+          <span class="key">api-token</span><span class="op">:</span> <span class="str">${{ secrets.AI_API_TOKEN }}</span>
+          <span class="key">model</span><span class="op">:</span> <span class="str">gpt-4o</span></pre>
+        </div>
+        <p class="code-note">Um job por modo, cada um com a permissão que precisa: o do pull request escreve comentários, o do scan só lê. O <code>if</code> garante que cada evento dispare apenas o job certo.</p>
+      </div>
+
     </div>
   </div>
 </section>
@@ -502,67 +655,82 @@
   <div class="wrap">
     <p class="section-label">Referência</p>
     <h2>Inputs <span class="dim">e outputs</span></h2>
-    <table class="inputs-table">
-      <thead>
-        <tr>
-          <th>Input</th>
-          <th></th>
-          <th>Padrão</th>
-          <th>Descrição</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><span class="input-name">api-token</span></td>
-          <td><span class="badge badge-req">obrigatório</span></td>
-          <td>—</td>
-          <td>Chave de API para o provedor de IA escolhido.</td>
-        </tr>
-        <tr>
-          <td><span class="input-name">model</span></td>
-          <td><span class="badge badge-req">obrigatório</span></td>
-          <td>—</td>
-          <td>ID do modelo a usar (ex: <code>gpt-4o</code>).</td>
-        </tr>
-        <tr>
-          <td><span class="input-name">api-base-url</span></td>
-          <td><span class="badge badge-opt">opcional</span></td>
-          <td><code>openai.com/v1</code></td>
-          <td>URL base do endpoint Chat Completions.</td>
-        </tr>
-        <tr>
-          <td><span class="input-name">github-token</span></td>
-          <td><span class="badge badge-opt">opcional</span></td>
-          <td><code>github.token</code></td>
-          <td>Token para ler o PR e postar comentários.</td>
-        </tr>
-        <tr>
-          <td><span class="input-name">system-prompt</span></td>
-          <td><span class="badge badge-opt">opcional</span></td>
-          <td>embutido</td>
-          <td>Override do prompt de sistema do revisor.</td>
-        </tr>
-        <tr>
-          <td><span class="input-name">max-files</span></td>
-          <td><span class="badge badge-opt">opcional</span></td>
-          <td><code>50</code></td>
-          <td>Limite de arquivos alterados enviados à IA.</td>
-        </tr>
-        <tr>
-          <td><span class="input-name">exclude</span></td>
-          <td><span class="badge badge-opt">opcional</span></td>
-          <td>—</td>
-          <td>Globs separados por vírgula para ignorar arquivos.</td>
-        </tr>
-        <tr>
-          <td><span class="input-name">fail-on-findings</span></td>
-          <td><span class="badge badge-opt">opcional</span></td>
-          <td><code>false</code></td>
-          <td>Falha o job quando qualquer achado é reportado.</td>
-        </tr>
-      </tbody>
-    </table>
-    <p style="margin-top:1.5rem;font-size:.9rem;color:var(--text-muted)"><strong style="color:var(--text)">Output:</strong> <code style="font-family:'IBM Plex Mono',monospace;font-size:.84rem;color:var(--blue)">findings-count</code> — número de achados produzidos pela IA.</p>
+    <p class="section-intro">A mesma lista vale para os dois modos. Só <code style="font-family:'IBM Plex Mono',monospace;font-size:.88rem;color:var(--blue)">api-token</code> e <code style="font-family:'IBM Plex Mono',monospace;font-size:.88rem;color:var(--blue)">model</code> são obrigatórios.</p>
+    <div class="table-scroll">
+      <table class="inputs-table">
+        <thead>
+          <tr>
+            <th>Input</th>
+            <th></th>
+            <th>Padrão</th>
+            <th>Descrição</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="input-name">api-token</span></td>
+            <td><span class="badge badge-req">obrigatório</span></td>
+            <td>—</td>
+            <td>Chave de API para o provedor de IA escolhido.</td>
+          </tr>
+          <tr>
+            <td><span class="input-name">model</span></td>
+            <td><span class="badge badge-req">obrigatório</span></td>
+            <td>—</td>
+            <td>ID do modelo a usar (ex: <code>gpt-4o</code>).</td>
+          </tr>
+          <tr>
+            <td><span class="input-name">mode</span></td>
+            <td><span class="badge badge-opt">opcional</span></td>
+            <td><code>pr</code></td>
+            <td><code>pr</code> revisa o diff do pull request; <code>full</code> escaneia o repositório inteiro (exige <code>actions/checkout</code>).</td>
+          </tr>
+          <tr>
+            <td><span class="input-name">api-base-url</span></td>
+            <td><span class="badge badge-opt">opcional</span></td>
+            <td><code>api.openai.com/v1</code></td>
+            <td>URL base do endpoint Chat Completions.</td>
+          </tr>
+          <tr>
+            <td><span class="input-name">max-files</span></td>
+            <td><span class="badge badge-opt">opcional</span></td>
+            <td><code>500</code></td>
+            <td>Limite de arquivos enviados à IA em uma execução.</td>
+          </tr>
+          <tr>
+            <td><span class="input-name">include</span></td>
+            <td><span class="badge badge-opt">opcional</span></td>
+            <td>—</td>
+            <td>Globs dos arquivos a revisar no scan completo. Vazio = todos os arquivos versionados.</td>
+          </tr>
+          <tr>
+            <td><span class="input-name">exclude</span></td>
+            <td><span class="badge badge-opt">opcional</span></td>
+            <td>—</td>
+            <td>Globs de arquivos a ignorar, separados por vírgula ou quebra de linha.</td>
+          </tr>
+          <tr>
+            <td><span class="input-name">report-path</span></td>
+            <td><span class="badge badge-opt">opcional</span></td>
+            <td><code>scaia-report.md</code></td>
+            <td>Onde gravar o relatório Markdown do scan completo.</td>
+          </tr>
+          <tr>
+            <td><span class="input-name">min-confidence</span></td>
+            <td><span class="badge badge-opt">opcional</span></td>
+            <td><code>0.8</code></td>
+            <td>Confiança mínima (0–1) para um achado ser publicado, aplicada após a verificação.</td>
+          </tr>
+          <tr>
+            <td><span class="input-name">fail-on-findings</span></td>
+            <td><span class="badge badge-opt">opcional</span></td>
+            <td><code>false</code></td>
+            <td>Falha o job quando qualquer achado é reportado.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:1.5rem;font-size:.9rem;color:var(--text-muted)"><strong style="color:var(--text)">Outputs:</strong> <code style="font-family:'IBM Plex Mono',monospace;font-size:.84rem;color:var(--blue)">findings-count</code> — número de achados publicados; <code style="font-family:'IBM Plex Mono',monospace;font-size:.84rem;color:var(--blue)">report-path</code> - caminho do relatório Markdown gerado.</p>
   </div>
 </section>
 
@@ -583,9 +751,24 @@
         <p>OpenAI, OpenRouter, Anthropic via proxy, Mistral, Groq ou modelo self-hosted — qualquer endpoint <code style="font-family:'IBM Plex Mono',monospace;font-size:.82rem">/v1/chat/completions</code>.</p>
       </div>
       <div class="feature">
+        <div class="feature-icon">🔁</div>
+        <h3>Dois modos, um setup</h3>
+        <p>O mesmo provider e os mesmos filtros servem ao PR do dia a dia e ao scan periódico do repositório inteiro. Muda só o <code style="font-family:'IBM Plex Mono',monospace;font-size:.82rem">mode</code>.</p>
+      </div>
+      <div class="feature">
         <div class="feature-icon">💬</div>
         <h3>Comentários inline</h3>
-        <p>Os achados vão para as linhas exatas do diff. O que fica fora do alcance é incluído no resumo da revisão.</p>
+        <p>No modo <code style="font-family:'IBM Plex Mono',monospace;font-size:.82rem">pr</code>, os achados vão para as linhas exatas do diff. O que fica fora do alcance é incluído no resumo da revisão.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">📄</div>
+        <h3>Relatório versionável</h3>
+        <p>No modo <code style="font-family:'IBM Plex Mono',monospace;font-size:.82rem">full</code>, os achados viram um Markdown agrupado por severidade — artifact do workflow e Job Summary.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🎯</div>
+        <h3>Achados verificados</h3>
+        <p>Toda descoberta passa por uma segunda opinião do modelo e pelo corte de <code style="font-family:'IBM Plex Mono',monospace;font-size:.82rem">min-confidence</code> antes de ser publicada.</p>
       </div>
     </div>
   </div>
@@ -664,18 +847,23 @@
     } catch(e) {}
   })();
 
+  // Cada grupo de abas é independente: só mexe no .tab-group que contém o botão.
   function showTab(id, e) {
-    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
-    document.getElementById('tab-' + id).classList.add('active');
-    if (e && e.target) e.target.classList.add('active');
+    const btn = e && e.currentTarget ? e.currentTarget : null;
+    if (!btn) return;
+    const group = btn.closest('.tab-group') || document;
+    group.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+    group.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    btn.classList.add('active');
+    const panel = group.querySelector('#tab-' + id);
+    if (panel) panel.classList.add('active');
   }
 
   function copyCode(id, e) {
     const el = document.getElementById(id);
     if (!el) return;
+    const btn = e && e.currentTarget ? e.currentTarget : null;
     navigator.clipboard.writeText(el.innerText).then(() => {
-      const btn = e && e.target ? e.target : null;
       if (!btn) return;
       btn.textContent = 'copiado ✓';
       setTimeout(() => btn.textContent = 'copiar', 1800);
