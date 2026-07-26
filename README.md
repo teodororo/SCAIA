@@ -1,4 +1,5 @@
-# SCAIA (Software Composition AI Analysis) - Github Action de Revisão de Código por IA
+# SCAIA - Software Composition AI Analysis
+# Github Action de Revisão de Código por IA
 
 Uma GitHub Action reutilizável que roda uma revisão por IA no seu código. Quem
 usa traz **o próprio token de IA** e aponta a action para **qualquer endpoint
@@ -139,3 +140,6 @@ npm run build       # empacota em dist/ com o ncc
 
 O `dist/index.js` empacotado precisa ser commitado, o GitHub Actions o executa
 diretamente.
+
+## Aviso de Uso Responsável
+Este projeto destina-se exclusivamente a fins educacionais, pesquisa e testes autorizados de segurança. Os autores não autorizam nem incentivam seu uso para atividades ilegais ou não autorizadas. O usuário é o único responsável por cumprir as leis e regulamentos aplicáveis.
