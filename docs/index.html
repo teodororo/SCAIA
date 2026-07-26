@@ -422,7 +422,7 @@
         <div class="demo-body">
           <div class="diff-line"><span class="ln">12</span><span class="code-content" style="color:var(--text-muted)">export function createToken(userId: string) {</span></div>
           <div class="diff-line remove"><span class="ln">13</span><span class="code-content">  const secret = process.env.JWT_SECRET;</span></div>
-          <div class="diff-line add"><span class="ln">13</span><span class="code-content">  const secret = process.env.JWT_SECRET ?? 'dev-fallback';</span></div>
+          <div class="diff-line add"><span class="ln">13</span><span class="code-content">  const secret = process.env.JWT_SECRET ?? '8iWm1ZcAUkrJaPUGMdLT7IbhkP5u';</span></div>
           <div class="diff-line finding"><span class="ln">14</span><span class="code-content">  return jwt.sign({ id: userId }, secret, { expiresIn: '30d' });</span></div>
           <div class="ai-comment">
             <div class="ai-comment-header">
@@ -431,7 +431,7 @@
               <span class="severity-badge sev-error">🔴 crítico</span>
               <span class="ai-meta">confiança 94% · CWE-798</span>
             </div>
-            <p>O fallback <code style="font-size:.78rem;font-family:'IBM Plex Mono',monospace">'dev-fallback'</code> como secret de JWT pode vazar para produção. Remova o operador <code style="font-size:.78rem;font-family:'IBM Plex Mono',monospace">??</code> e lance um erro explícito quando a variável não estiver definida.</p>
+            <p>O secret <code style="font-size:.78rem;font-family:'IBM Plex Mono',monospace">JWT_SECRET</code> pode vazar para produção. Remova o operador <code style="font-size:.78rem;font-family:'IBM Plex Mono',monospace">??</code> e lance um erro explícito quando a variável não estiver definida.</p>
             </div>
         </div>
       </div>
