@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>🐸 SCAIA</title>
+  <title>SCAIA</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%20100%20100%27%3E%3Ctext%20y%3D%27.9em%27%20font-size%3D%2790%27%3E%F0%9F%90%B8%3C%2Ftext%3E%3C%2Fsvg%3E" />
   <meta name="description" content="GitHub Action que revisa pull requests com IA. Traga seu token, aponte para qualquer endpoint OpenAI-compatível." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -466,7 +467,7 @@
   <span class="key">review</span><span class="op">:</span>
     <span class="key">runs-on</span><span class="op">:</span> <span class="str">ubuntu-latest</span>
     <span class="key">steps</span><span class="op">:</span>
-      <span class="op">-</span> <span class="key">uses</span><span class="op">:</span> <span class="str">teodororo/SCAIA@v1</span>
+      <span class="op">-</span> <span class="key">uses</span><span class="op">:</span> <span class="str">teodororo/SCAIA@v2</span>
         <span class="key">with</span><span class="op">:</span>
           <span class="key">api-token</span><span class="op">:</span> <span class="str">${{ secrets.AI_API_TOKEN }}</span>
           <span class="key">model</span><span class="op">:</span> <span class="str">gpt-4o</span></pre>
