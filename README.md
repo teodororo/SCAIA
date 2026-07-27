@@ -5,7 +5,7 @@
 
 Clique na imagem abaixo para ser redirecionado ao vídeo de explicação sobre a ferramenta. 
 
-[![Assista ao vídeo](https://img.youtube.com/vi/ub5XGXFMAOc/maxresdefault.jpg)](https://www.youtube.com/watch?v=ub5XGXFMAOc)
+[![Assista ao vídeo](https://img.youtube.com/vi/ub5XGXFMAOc/maxresdefault.jpg)](https://www.youtube.com/watch?v=ub5XGXFMAOc "Assista ao vídeo")
 
 
 O SCAIA é uma GitHub Action reutilizável que roda revisão por IA no seu código. Quem
