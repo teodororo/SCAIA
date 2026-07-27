@@ -148,5 +148,10 @@ npm run build       # empacota em dist/ com o ncc
 O `dist/index.js` empacotado precisa ser commitado, o GitHub Actions o executa
 diretamente.
 
+## Avaliação Experimental
+
+Para avaliar a capacidade de detecção do SCAIA, foram construídos 36 cenários sintéticos de `pull request`, distribuídos igualmente entre seis classes de vulnerabilidades. Para cada classe, foram construídos quatro cenários vulneráveis e dois cenários com a vulnerabilidade corrigida ou mitigada. Cada cenário foi analisado três vezes, em execuções separadas, pelo modo `pr` do SCAIA, configurado com o modelo `gpt-4o` e `temperature=0`, totalizando 108 execuções. O repositório com os cenários está disponível em [teodororo/SCAIA_test](https://github.com/teodororo/SCAIA_test). Cada cenário corresponde a um  `pull request`.
+
+
 ## Aviso de Uso Responsável
 Este projeto destina-se exclusivamente a fins educacionais, pesquisa e testes autorizados de segurança. Os autores não autorizam nem incentivam seu uso para atividades ilegais ou não autorizadas. O usuário é o único responsável por cumprir as leis e regulamentos aplicáveis.
