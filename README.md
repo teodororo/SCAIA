@@ -3,6 +3,8 @@
 
 ## Vídeo técnico detalhado - Demonstração
 
+Clique na imagem abaixo para ser redirecionado ao vídeo de explicação sobre a ferramenta. 
+
 [![Assista ao vídeo](https://img.youtube.com/vi/ub5XGXFMAOc/maxresdefault.jpg)](https://www.youtube.com/watch?v=ub5XGXFMAOc)
 
 
