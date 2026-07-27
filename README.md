@@ -1,7 +1,12 @@
 # SCAIA - Software Composition AI Analysis
 # Github Action de Revisão de Código por IA
 
-Uma GitHub Action reutilizável que roda uma revisão por IA no seu código. Quem
+## Vídeo técnico detalhado - Demonstração
+
+[![Assista ao vídeo](https://img.youtube.com/vi/ub5XGXFMAOc/maxresdefault.jpg)](https://www.youtube.com/watch?v=ub5XGXFMAOc)
+
+
+O SCAIA é uma GitHub Action reutilizável que roda revisão por IA no seu código. Quem
 usa traz **o próprio token de IA** e aponta a action para **qualquer endpoint
 Chat Completions compatível com a OpenAI** (OpenAI, OpenRouter, um proxy do
 Claude, um modelo self-hosted, etc.).
